@@ -1,0 +1,51 @@
+alert_settings:
+  traffic_threshold_percent: 30   # Alert when current > avg + 30%
+  min_samples_for_alerts: 5       # Don't alert until at least this many samples
+  max_alerts_per_day: 3           # Rate limit: max alerts per route per day
+
+# ── Email ──────────────────────────────────────────────────────────────────
+email:
+  enabled: false
+  method: smtp                    # "smtp" or "mail" (PHP mail() fallback)
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  smtp_encryption: tls            # "tls" (STARTTLS) or "ssl"
+  smtp_username: "your@gmail.com"
+  smtp_password: "your-app-password"   # Gmail: use App Password, not account password
+  from_address: "your@gmail.com"
+  from_name: "Route Tracker"
+  recipients:
+    - "vangelis@example.com"
+    # - "wife@example.com"
+
+# ── Telegram ───────────────────────────────────────────────────────────────
+# 1. Create a bot via @BotFather → get bot_token
+# 2. Send a message to your bot, then visit:
+#    https://api.telegram.org/bot<TOKEN>/getUpdates
+#    to find your chat_id
+telegram:
+  enabled: false
+  bot_token: "123456789:ABCdef-YOUR_BOT_TOKEN_HERE"
+  chat_ids:
+    - "YOUR_CHAT_ID"
+    # - "WIFE_CHAT_ID"
+
+# ── Viber ──────────────────────────────────────────────────────────────────
+# Requires a Viber Public Account / Bot
+# Users must message the bot first to subscribe
+viber:
+  enabled: false
+  auth_token: "YOUR_VIBER_AUTH_TOKEN"
+  receiver_ids:
+    - "YOUR_VIBER_USER_ID"
+
+# ── Signal ─────────────────────────────────────────────────────────────────
+# Requires signal-cli-rest-api running locally in Docker:
+#   docker run -p 8080:8080 bbernhard/signal-cli-rest-api
+# Then register/link your Signal account via the API
+signal:
+  enabled: false
+  api_url: "http://localhost:8080"
+  sender_number: "+30XXXXXXXXXX"
+  recipient_numbers:
+    - "+30XXXXXXXXXX"
