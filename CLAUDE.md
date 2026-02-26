@@ -32,9 +32,10 @@ Route Tracker v2 is a PHP-based system that:
 
 **Web Interface**
 - `dashboard.php`: Session-authenticated HTML entry point (loads dashboard.js/css)
-- `api.php`: REST API with actions: route_list, overview, by_day, by_month, timeline, best_routes, collections
+- `api.php`: REST API with actions: route_list, overview, by_day, by_month, timeline, best_routes, collections, route_map
 - `auth.php`: Session-based authentication (password from config.yaml, no tokens in URLs)
 - `dashboard.js`: Vanilla JS client with Canvas charts and tabbed interface
+- `map.php`: Interactive map view for a stored collection (`?collection_id=<id>`); uses Leaflet.js + OpenStreetMap tiles (free, no API key). Draws polylines for all routes (primary + alternatives) with distinct colors, start/end emoji markers, a sibling date-picker to jump between collections for the same route, and a side panel with route legend and turn-by-turn steps. Calls `api.php?action=route_map`.
 - All API calls require active session; no API token exposed to browser
 
 **Database**
