@@ -1,0 +1,21 @@
+google_maps:
+  api_key: "YOUR_GOOGLE_MAPS_API_KEY_HERE"
+  language: el          # Greek road names in responses
+  region: gr
+
+database:
+  path: "data/routes.sqlite"   # Relative to project root
+
+timezone: "Europe/Athens"
+
+# Token for API calls — still used internally, keep this a random string
+api_token: "change-this-to-a-random-string"
+
+# Password for the dashboard login page (login.php)
+# Set this to a strong password before exposing the dashboard
+dashboard_password: "change-this-to-a-strong-password"
+
+collection:
+  window_before_minutes: 15    # Start collecting X min before scheduled time
+  window_after_minutes: 5      # Stop collecting X min after scheduled time
+  request_alternatives: true   # Ask Google for 2–3 alternative routes

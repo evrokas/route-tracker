@@ -1,0 +1,13 @@
+routes:
+
+  # ── Add more routes below as needed ──────────────────────────────────────
+  #
+  # - id: son_swimming
+  #   label: "Son → Swimming"
+  #   origin: "HOME_ADDRESS_HERE"
+  #   destination: "POOL_ADDRESS_HERE"
+  #   travel_mode: driving
+  #   alerts: [telegram]
+  #   schedule:
+  #     - days: Sat
+  #       depart: "10:00"
