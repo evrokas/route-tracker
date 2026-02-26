@@ -675,8 +675,9 @@ const SimpleChart = (() => {
 // ═══════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', init);
 
+// Resize: redraw current view (no cache clear, no re-fetch)
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { clearCache(); render(); }, 250);
+  resizeTimer = setTimeout(() => render(), 250);
 });
