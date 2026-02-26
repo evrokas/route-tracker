@@ -223,11 +223,18 @@ async function renderOverview(box) {
       return `<div class="schedule-tag">${s.days} ${m} ${t}</div>`;
     }).join('');
 
+    const mapLink = r.latest_collection_id
+      ? `<a href="map.php?collection_id=${r.latest_collection_id}" target="_blank"
+            title="View latest collection on map"
+            style="text-decoration:none;font-size:16px;opacity:.7;margin-left:auto;">🗺️</a>`
+      : '';
+
     html += `
       <div class="card">
         <div class="card-header">
           <span class="card-title">${r.route_label || r.route_id}</span>
           ${badge}
+          ${mapLink}
         </div>
         <div class="card-value">${sec2min(r.avg_duration)}</div>
         <div class="card-unit">average travel time · ${r.total_collections} samples</div>

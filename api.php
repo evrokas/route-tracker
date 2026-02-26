@@ -161,7 +161,19 @@ if ($action === 'overview') {
             MAX(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS max_duration,
             c.scheduled_time, c.schedule_mode,
             MIN(c.collected_at) AS first_seen,
-            MAX(c.collected_at) AS last_seen
+            MAX(c.collected_at) AS last_seen,
+            (
+                SELECT c2.id FROM collections c2
+                WHERE c2.route_id = c.route_id AND c2.api_status = 'OK'
+                ORDER BY c2.collected_at DESC
+                LIMIT 1
+            ) AS latest_collection_id,
+            (
+                SELECT c2.collected_at FROM collections c2
+                WHERE c2.route_id = c.route_id AND c2.api_status = 'OK'
+                ORDER BY c2.collected_at DESC
+                LIMIT 1
+            ) AS latest_collected_at
         FROM collections c
         JOIN routes r ON r.collection_id = c.id AND r.route_index = 0
         WHERE {$where}
