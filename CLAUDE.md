@@ -36,8 +36,9 @@ Route Tracker v2 is a PHP-based system that:
 - `auth.php`: Session-based authentication (password from config.yaml, no tokens in URLs)
 - `dashboard.js`: Vanilla JS client with Canvas charts and tabbed interface
 - `map.php`: Interactive map view for a stored collection (`?collection_id=<id>`); uses Leaflet.js + OpenStreetMap tiles (free, no API key). Draws polylines for all routes (primary + alternatives) with distinct colors, start/end emoji markers, a sibling date-picker to jump between collections for the same route, and a side panel with route legend and turn-by-turn steps. Calls `api.php?action=route_map`.
-- Overview tab route cards show a 🗺️ link that opens the latest successful collection for that route in `map.php`; the link is omitted if no OK collection exists yet. The `overview` API action returns `latest_collection_id` and `latest_collected_at` via correlated subqueries.
-- History tab collection rows also link to `map.php?collection_id=<id>` for any individual collection.
+- Overview tab route cards show a 🗺️ link (internal map) and a 🧭 link (Google Maps Directions, `travelmode=driving`) in the card header; both are omitted gracefully when data is unavailable. The `overview` API action returns `latest_collection_id`, `latest_collected_at`, `origin`, and `destination`.
+- History tab collection rows show the same 🗺️ and 🧭 links per row. The `collections` API action also returns `origin` and `destination`.
+- Google Maps navigation URL format: `https://www.google.com/maps/dir/?api=1&origin=<origin>&destination=<destination>&travelmode=driving`
 - All API calls require active session; no API token exposed to browser
 
 **Database**
