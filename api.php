@@ -155,6 +155,7 @@ if ($action === 'overview') {
     $rows = $pdo->prepare("
         SELECT
             c.route_id, c.route_label,
+            c.origin, c.destination,
             COUNT(DISTINCT c.id)                                              AS total_collections,
             AVG(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS avg_duration,
             MIN(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS min_duration,
@@ -380,7 +381,7 @@ if ($action === 'collections') {
         SELECT
             c.id, c.route_id, c.route_label, c.collected_at,
             c.scheduled_day, c.day_of_week, c.scheduled_time, c.schedule_mode,
-            c.api_status,
+            c.api_status, c.origin, c.destination,
             GROUP_CONCAT(r.summary || ' (' || ROUND(COALESCE(r.duration_in_traffic_seconds,r.duration_seconds)/60.0,1) || ' min)', ' | ') AS routes_summary
         FROM collections c
         LEFT JOIN routes r ON r.collection_id = c.id

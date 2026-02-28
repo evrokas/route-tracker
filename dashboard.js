@@ -229,12 +229,19 @@ async function renderOverview(box) {
             style="text-decoration:none;font-size:16px;opacity:.7;margin-left:auto;">🗺️</a>`
       : '';
 
+    const gmapsLink = (r.origin && r.destination)
+      ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(r.origin)}&destination=${encodeURIComponent(r.destination)}&travelmode=driving"
+            target="_blank" title="Navigate in Google Maps"
+            style="text-decoration:none;font-size:16px;opacity:.7;margin-left:6px;">🧭</a>`
+      : '';
+
     html += `
       <div class="card">
         <div class="card-header">
           <span class="card-title">${r.route_label || r.route_id}</span>
           ${badge}
           ${mapLink}
+          ${gmapsLink}
         </div>
         <div class="card-value">${sec2min(r.avg_duration)}</div>
         <div class="card-unit">average travel time · ${r.total_collections} samples</div>
@@ -469,12 +476,18 @@ async function renderHistory(box) {
 
   for (const r of rows) {
     const statusColor = r.api_status === 'OK' ? 'var(--green)' : 'var(--red)';
+    const histGmapsLink = (r.origin && r.destination)
+      ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(r.origin)}&destination=${encodeURIComponent(r.destination)}&travelmode=driving"
+            target="_blank" title="Navigate in Google Maps"
+            style="margin-left:6px;text-decoration:none;font-size:14px;vertical-align:middle;opacity:.7;">🧭</a>`
+      : '';
     html += `<tr>
       <td style="color:var(--muted);font-size:11px">
         ${r.id}
         <a href="map.php?collection_id=${r.id}" target="_blank"
            title="View on map"
            style="margin-left:6px;text-decoration:none;font-size:14px;vertical-align:middle;opacity:.7;">🗺️</a>
+        ${histGmapsLink}
       </td>
       <td class="td-route">${r.route_label || r.route_id}</td>
       <td>${r.day_of_week || '–'}</td>
