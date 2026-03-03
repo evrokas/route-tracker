@@ -517,6 +517,43 @@ function exportTrips() {
   window.location.href = `${API_BASE}?action=export_trips`;
 }
 
+function exportConfig() {
+  window.location.href = `${API_BASE}?action=export_config`;
+}
+
+async function importConfig() {
+  const file = document.getElementById('configBackupFile')?.files?.[0];
+  if (!file) { alert('Select a backup JSON file first.'); return; }
+
+  if (!confirm('This will overwrite ALL current settings and routes with the backup. Continue?')) return;
+
+  const statusEl = document.getElementById('importStatus');
+  if (statusEl) { statusEl.textContent = 'Restoring…'; statusEl.className = 'save-status'; }
+
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch (e) {
+    if (statusEl) { statusEl.textContent = 'Invalid file: ' + e.message; statusEl.className = 'save-status error'; }
+    return;
+  }
+
+  const result = await apiPost({ action: 'import_config' }, backup);
+
+  if (result?.ok) {
+    if (statusEl) {
+      statusEl.textContent = `Restored: ${result.settings_updated} settings, ${result.routes_imported} routes.`;
+      statusEl.className = 'save-status ok';
+    }
+    setTimeout(() => location.reload(), 1500);
+  } else {
+    if (statusEl) {
+      statusEl.textContent = result?.error || 'Restore failed.';
+      statusEl.className = 'save-status error';
+    }
+  }
+}
+
 async function loadLog(type, btn) {
   // Update active tab button
   document.querySelectorAll('.log-tab-btn').forEach(b => b.classList.remove('active'));

@@ -23,6 +23,7 @@
  *   ?action=get_logs        &type=collector|alerts|advisor
  *   ?action=db_stats
  *   ?action=export_trips
+ *   ?action=export_config
  *
  * POST actions (JSON body or form data):
  *   ?action=save_setting     { key, value }  or  { settings: {key:value,...} }
@@ -30,6 +31,7 @@
  *   ?action=delete_route     { id }
  *   ?action=test_alert       { channel }
  *   ?action=change_password  { current, new_password, confirm }
+ *   ?action=import_config    { version, settings:{}, routes:[] }
  *
  * Global GET filters (for data queries):
  *   &route_id=xxx
@@ -543,6 +545,126 @@ if ($action === 'export_trips') {
     }
     fclose($out);
     exit;
+}
+
+// ─── export_config ────────────────────────────────────────────────────────────
+
+if ($action === 'export_config') {
+    // All settings as flat key→value map
+    $settings = $pdo->query("SELECT key, value FROM settings ORDER BY key")
+                    ->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // All routes with JSON fields re-encoded for portability
+    $routes = array_map(function ($r) {
+        return [
+            'id'                   => $r['id'],
+            'label'                => $r['label'],
+            'origin'               => $r['origin'],
+            'destination'          => $r['destination'],
+            'travel_mode'          => $r['travel_mode'],
+            'schedule'             => $r['schedule'],        // already decoded array
+            'advisor_enabled'      => (int)$r['advisor_enabled'],
+            'advisor_start_before' => (int)$r['advisor_start_before'],
+            'advisor_buffer_mode'  => $r['advisor_buffer_mode'],
+            'advisor_fixed_buffer' => (int)$r['advisor_fixed_buffer'],
+            'advisor_stages'       => $r['advisor_stages'],  // already decoded array
+            'alert_channels'       => $r['alert_channels'],  // already decoded array
+            'active'               => (int)$r['active'],
+            'created_at'           => $r['created_at'],
+        ];
+    }, $config->getAllRoutes());
+
+    $backup = [
+        'version'     => 3,
+        'app'         => 'Route Tracker',
+        'exported_at' => date('c'),
+        'settings'    => $settings,
+        'routes'      => $routes,
+    ];
+
+    $filename = 'tracker_config_' . date('Ymd_His') . '.json';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    header('Cache-Control: no-cache, no-store');
+    echo json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ─── import_config ────────────────────────────────────────────────────────────
+
+if ($action === 'import_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    $body = json_decode(file_get_contents('php://input'), true);
+
+    if (!is_array($body) || ($body['version'] ?? 0) !== 3) {
+        jsonError('Invalid backup file: expected Route Tracker v3 format (version: 3)');
+    }
+
+    $settingsUpdated = 0;
+    $routesImported  = 0;
+
+    $pdo->beginTransaction();
+    try {
+        // Restore settings
+        if (!empty($body['settings']) && is_array($body['settings'])) {
+            $st = $pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (:key, :value)");
+            foreach ($body['settings'] as $key => $value) {
+                $st->execute([':key' => (string)$key, ':value' => (string)$value]);
+                $settingsUpdated++;
+            }
+        }
+
+        // Restore routes
+        if (!empty($body['routes']) && is_array($body['routes'])) {
+            $st = $pdo->prepare("
+                INSERT OR REPLACE INTO routes
+                    (id, label, origin, destination, travel_mode, schedule,
+                     advisor_enabled, advisor_start_before, advisor_buffer_mode,
+                     advisor_fixed_buffer, advisor_stages, alert_channels, active,
+                     created_at, updated_at)
+                VALUES
+                    (:id, :label, :origin, :destination, :travel_mode, :schedule,
+                     :advisor_enabled, :advisor_start_before, :advisor_buffer_mode,
+                     :advisor_fixed_buffer, :advisor_stages, :alert_channels, :active,
+                     :created_at, :updated_at)
+            ");
+            foreach ($body['routes'] as $r) {
+                if (empty($r['id']) || empty($r['label'])) continue;
+                // Normalise JSON fields: accept either arrays (from export) or raw JSON strings
+                $encodeIfArray = fn($v, $default) => is_array($v) ? json_encode($v, JSON_UNESCAPED_UNICODE) : ($v ?? $default);
+                $st->execute([
+                    ':id'                   => $r['id'],
+                    ':label'                => $r['label'],
+                    ':origin'               => $r['origin']               ?? '',
+                    ':destination'          => $r['destination']          ?? '',
+                    ':travel_mode'          => $r['travel_mode']          ?? 'driving',
+                    ':schedule'             => $encodeIfArray($r['schedule']        ?? null, '[]'),
+                    ':advisor_enabled'      => (int)($r['advisor_enabled']      ?? 0),
+                    ':advisor_start_before' => (int)($r['advisor_start_before']  ?? 90),
+                    ':advisor_buffer_mode'  => $r['advisor_buffer_mode']  ?? 'auto',
+                    ':advisor_fixed_buffer' => (int)($r['advisor_fixed_buffer']  ?? 10),
+                    ':advisor_stages'       => $encodeIfArray($r['advisor_stages']  ?? null, '["planning","window","reminder","urgent","last_call"]'),
+                    ':alert_channels'       => $encodeIfArray($r['alert_channels'] ?? null, '[]'),
+                    ':active'               => (int)($r['active'] ?? 1),
+                    ':created_at'           => $r['created_at'] ?? date('c'),
+                    ':updated_at'           => date('c'),
+                ]);
+                $routesImported++;
+            }
+        }
+
+        $pdo->commit();
+        Config::reset();
+
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        jsonError('Import failed: ' . $e->getMessage());
+    }
+
+    jsonOut([
+        'ok'               => true,
+        'settings_updated' => $settingsUpdated,
+        'routes_imported'  => $routesImported,
+    ]);
 }
 
 // ─── test_collection ──────────────────────────────────────────────────────────

@@ -146,8 +146,10 @@ input[type=text].sched-time {
   font-family: var(--font);
 }
 .btn-tiny:hover { border-color: var(--accent); }
-.btn-tiny.btn-danger { color: var(--red); }
+.btn-tiny.btn-danger       { color: var(--red); }
 .btn-tiny.btn-danger:hover { border-color: var(--red); }
+.btn-secondary.btn-danger       { color: var(--red); }
+.btn-secondary.btn-danger:hover { border-color: var(--red); }
 
 /* ─── Footer ─────────────────────────────────────────────────────────────── */
 

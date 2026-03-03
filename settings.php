@@ -309,6 +309,26 @@ $currentTz = $config->getTimezone();
   </div>
 
   <div class="settings-section">
+    <div class="section-title">Backup &amp; Restore</div>
+    <p class="field-hint" style="margin-bottom:14px">
+      The backup file is a JSON snapshot of all settings and routes (including API keys and credentials).
+      Store it securely.
+    </p>
+    <div class="field-row">
+      <button class="btn-primary" onclick="exportConfig()">⬇ Download Config Backup</button>
+    </div>
+    <div style="margin-top:20px">
+      <label class="label">Restore from backup file</label>
+      <div class="field-row" style="margin-top:8px">
+        <input type="file" id="configBackupFile" accept=".json" style="flex:1;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px">
+        <button class="btn-secondary btn-danger" onclick="importConfig()">Restore</button>
+      </div>
+      <div class="field-hint" style="margin-top:6px">Warning: restoring overwrites all current settings and routes.</div>
+      <div id="importStatus" class="save-status" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div class="settings-section">
     <div class="section-title-row">
       <span class="section-title">Recent Logs</span>
       <div class="log-tabs">
