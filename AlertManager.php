@@ -1,8 +1,9 @@
 <?php
 
 /**
- * AlertManager.php — Route Tracker v2
- * Multi-channel alert sending (Email, Telegram, Viber, Signal)
+ * AlertManager.php — Route Tracker v3
+ * Multi-channel alert sending (Email, Telegram, Viber, Signal).
+ * Configuration read from DB via Config (no YAML dependency).
  */
 
 class AlertManager
@@ -25,7 +26,7 @@ class AlertManager
     /**
      * Evaluate traffic and send alerts if thresholds are exceeded.
      *
-     * @param array      $route           Route definition from YAML
+     * @param array      $route           Route definition
      * @param array      $schedEntry      Schedule entry (_schedule_mode, _scheduled_time)
      * @param int        $currentDuration Current primary route duration in seconds
      * @param int|null   $avgDuration     Historical average in seconds (null = not enough data)
@@ -56,8 +57,8 @@ class AlertManager
             $currentDuration > $avgDuration * (1 + $settings['traffic_threshold_percent'] / 100)
         ) {
             if ($this->canSendAlert($route['id'])) {
-                $pct  = round(($currentDuration - $avgDuration) / $avgDuration * 100);
-                $msg  = $this->buildHeavyTrafficMessage(
+                $pct = round(($currentDuration - $avgDuration) / $avgDuration * 100);
+                $msg = $this->buildHeavyTrafficMessage(
                     $route, $schedEntry, $currentDuration, $avgDuration, $pct
                 );
                 $this->dispatch($channels, "🚗🔴 Heavy Traffic Alert", $msg, $route);
@@ -69,7 +70,7 @@ class AlertManager
         if (
             $bestAltRoute !== null &&
             $bestAltDuration !== null &&
-            ($currentDuration - $bestAltDuration) > 120   // > 2 minutes savings
+            ($currentDuration - $bestAltDuration) > 120  // > 2 minutes savings
         ) {
             if ($this->canSendAlert($route['id'])) {
                 $msg = $this->buildBetterRouteMessage(
@@ -101,13 +102,25 @@ class AlertManager
     }
 
     /**
+     * Send a raw message to a specific route's channels (used by advisor).
+     */
+    public function sendToRoute(array $route, string $subject, string $body): void
+    {
+        $channels = $this->config->getRouteAlertChannels($route);
+        if (empty($channels)) {
+            return;
+        }
+        $this->dispatch($channels, $subject, $body, $route);
+    }
+
+    /**
      * Send test message to all enabled channels for a route (or all routes).
      */
     public function sendTest(?string $routeId = null): void
     {
         $routes = $routeId
             ? array_filter([$this->config->getRoute($routeId)])
-            : $this->config->getAllRoutes();
+            : $this->config->getAllActiveRoutes();
 
         foreach ($routes as $route) {
             $channels = $this->config->getRouteAlertChannels($route);
@@ -123,6 +136,38 @@ class AlertManager
 
             echo "  Sending test to [" . implode(', ', $channels) . "] for: {$route['label']}\n";
             $this->dispatch($channels, "🧪 Route Tracker Test", $msg, $route);
+        }
+    }
+
+    /**
+     * Send a test message on a specific channel (for Settings → Alerts tab).
+     * Returns ['ok' => bool, 'message' => string].
+     */
+    public function sendTestChannel(string $channel): array
+    {
+        $cfg = $this->config->getAlertConfig($channel);
+        if (empty($cfg['enabled'])) {
+            return ['ok' => false, 'message' => "Channel '{$channel}' is not enabled."];
+        }
+
+        $body = "🧪 Route Tracker — Test Alert\n\n" .
+                "Channel: {$channel}\n" .
+                "Time: " . date('Y-m-d H:i:s') . "\n\n" .
+                "If you see this, {$channel} alerts are configured correctly.";
+
+        try {
+            $ok = false;
+            switch ($channel) {
+                case 'telegram': $ok = $this->sendTelegram($body); break;
+                case 'email':    $ok = $this->sendEmail("🧪 Route Tracker Test", $body); break;
+                case 'viber':    $ok = $this->sendViber($body); break;
+                case 'signal':   $ok = $this->sendSignal($body); break;
+                default:
+                    return ['ok' => false, 'message' => "Unknown channel: {$channel}"];
+            }
+            return ['ok' => $ok, 'message' => $ok ? 'Test message sent.' : 'Send failed — check logs.'];
+        } catch (Exception $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
         }
     }
 
@@ -151,11 +196,11 @@ class AlertManager
         array $route, array $sched, int $curDur, array $curRouteData,
         int $altDur, array $altRouteData
     ): string {
-        $curMin    = round($curDur / 60, 1);
-        $altMin    = round($altDur / 60, 1);
-        $savings   = round(($curDur - $altDur) / 60, 1);
-        $curName   = $curRouteData['summary'] ?? 'current route';
-        $altName   = $altRouteData['summary'] ?? 'alternative';
+        $curMin  = round($curDur / 60, 1);
+        $altMin  = round($altDur / 60, 1);
+        $savings = round(($curDur - $altDur) / 60, 1);
+        $curName = $curRouteData['summary'] ?? 'current route';
+        $altName = $altRouteData['summary'] ?? 'alternative';
 
         return "🚗💡 Better Route Found!\n\n" .
                "Route: {$route['label']}\n" .
@@ -183,7 +228,6 @@ class AlertManager
         $counts = $this->loadAlertCounts();
         $today  = date('Y-m-d');
 
-        // Prune old dates
         foreach (array_keys($counts) as $d) {
             if ($d !== $today) unset($counts[$d]);
         }
@@ -208,20 +252,11 @@ class AlertManager
         foreach ($channels as $channel) {
             try {
                 switch ($channel) {
-                    case 'email':
-                        $ok = $this->sendEmail($subject, $body);
-                        break;
-                    case 'telegram':
-                        $ok = $this->sendTelegram($body);
-                        break;
-                    case 'viber':
-                        $ok = $this->sendViber($body);
-                        break;
-                    case 'signal':
-                        $ok = $this->sendSignal($body);
-                        break;
-                    default:
-                        $ok = false;
+                    case 'email':    $ok = $this->sendEmail($subject, $body); break;
+                    case 'telegram': $ok = $this->sendTelegram($body); break;
+                    case 'viber':    $ok = $this->sendViber($body); break;
+                    case 'signal':   $ok = $this->sendSignal($body); break;
+                    default:         $ok = false;
                 }
                 $status = $ok ? 'OK' : 'FAIL';
             } catch (Exception $e) {
@@ -232,7 +267,7 @@ class AlertManager
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Email via SMTP or mail()
+    // Email via SMTP
     // ──────────────────────────────────────────────────────────────────────────
 
     private function sendEmail(string $subject, string $body): bool
@@ -244,30 +279,24 @@ class AlertManager
         if (empty($recipients)) return false;
 
         $method = $cfg['method'] ?? 'smtp';
-
         if ($method === 'smtp') {
             return $this->sendSmtp($cfg, $subject, $body, $recipients);
         }
 
-        // Fallback: PHP mail()
         $headers  = "From: {$cfg['from_name']} <{$cfg['from_address']}>\r\n";
         $headers .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $to = implode(', ', $recipients);
-        return mail($to, $subject, $body, $headers);
+        return mail(implode(', ', $recipients), $subject, $body, $headers);
     }
 
-    /**
-     * Raw SMTP via fsockopen + STARTTLS (no external libraries).
-     */
     private function sendSmtp(array $cfg, string $subject, string $body, array $recipients): bool
     {
-        $host       = $cfg['smtp_host']       ?? '';
-        $port       = (int)($cfg['smtp_port'] ?? 587);
-        $enc        = $cfg['smtp_encryption'] ?? 'tls';
-        $user       = $cfg['smtp_username']   ?? '';
-        $pass       = $cfg['smtp_password']   ?? '';
-        $from       = $cfg['from_address']    ?? $user;
-        $fromName   = $cfg['from_name']       ?? 'Route Tracker';
+        $host     = $cfg['smtp_host']       ?? '';
+        $port     = (int)($cfg['smtp_port'] ?? 587);
+        $enc      = $cfg['smtp_encryption'] ?? 'tls';
+        $user     = $cfg['smtp_username']   ?? '';
+        $pass     = $cfg['smtp_password']   ?? '';
+        $from     = $cfg['from_address']    ?? $user;
+        $fromName = $cfg['from_name']       ?? 'Route Tracker';
 
         if ($enc === 'ssl') {
             $host = 'ssl://' . $host;
@@ -285,7 +314,7 @@ class AlertManager
             return $read();
         };
 
-        $read(); // banner
+        $read();
 
         if ($enc === 'tls') {
             $send("EHLO localhost");
@@ -294,12 +323,9 @@ class AlertManager
         }
 
         $send("EHLO localhost");
-
-        // AUTH LOGIN
         $send("AUTH LOGIN");
         $send(base64_encode($user));
         $send(base64_encode($pass));
-
         $send("MAIL FROM:<{$from}>");
 
         foreach ($recipients as $rcpt) {
@@ -308,8 +334,8 @@ class AlertManager
 
         $send("DATA");
 
-        $date    = date('r');
-        $to      = implode(', ', $recipients);
+        $date           = date('r');
+        $to             = implode(', ', $recipients);
         $subjectEncoded = '=?UTF-8?B?' . base64_encode($subject) . '?=';
         $fromEncoded    = '=?UTF-8?B?' . base64_encode($fromName) . '?=';
 
@@ -384,11 +410,10 @@ class AlertManager
                 'type'     => 'text',
                 'text'     => $body,
             ]);
-            $headers = [
+            $resp = $this->httpPost($url, $payload, [
                 'Content-Type: application/json',
                 "X-Viber-Auth-Token: {$token}",
-            ];
-            $resp = $this->httpPost($url, $payload, $headers);
+            ]);
             if (!$resp) {
                 $ok = false;
             }
@@ -398,7 +423,7 @@ class AlertManager
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Signal (via signal-cli-rest-api)
+    // Signal
     // ──────────────────────────────────────────────────────────────────────────
 
     private function sendSignal(string $body): bool
@@ -407,8 +432,8 @@ class AlertManager
         if (empty($cfg['enabled'])) return false;
 
         $apiUrl     = rtrim($cfg['api_url'] ?? 'http://localhost:8080', '/');
-        $sender     = $cfg['sender_number']       ?? '';
-        $recipients = $cfg['recipient_numbers']   ?? [];
+        $sender     = $cfg['sender_number']     ?? '';
+        $recipients = $cfg['recipient_numbers'] ?? [];
         if (empty($sender) || empty($recipients)) return false;
 
         $payload = json_encode([

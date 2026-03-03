@@ -1,48 +1,48 @@
 <?php
 /**
- * login.php — Route Tracker v2
- * Simple session-based login. Password is set in config.yaml → dashboard_password.
- * If no password is configured, access is denied entirely.
+ * login.php — Route Tracker v3
+ * Session-based login. Password hash stored in the settings table.
+ * Default password after fresh install: changeme (set via Settings → General).
  */
 
 $baseDir = __DIR__;
 require_once $baseDir . '/Config.php';
 require_once $baseDir . '/auth.php';
 
-// Use Auth::startSession() — ensures cookie params (httponly, SameSite, etc.)
-// are set consistently across login.php, dashboard.php, and api.php
 Auth::startSession();
 
 $error = '';
 
 // ─── Load config ─────────────────────────────────────────────────────────────
+
 try {
-    $config   = Config::load($baseDir);
-    $password = $config->get('dashboard_password', '');
+    $config       = Config::load($baseDir);
+    $passwordHash = $config->getDashboardPasswordHash();
 } catch (Exception $e) {
-    $password = '';
-    $error    = 'Configuration error: ' . $e->getMessage();
+    $passwordHash = '';
+    $error        = 'Configuration error: ' . $e->getMessage();
 }
 
 // ─── Already logged in → redirect to dashboard ───────────────────────────────
+
 if (!empty($_SESSION['rt_authed'])) {
     header('Location: dashboard.php');
     exit;
 }
 
 // ─── Handle POST ─────────────────────────────────────────────────────────────
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $submitted = $_POST['password'] ?? '';
 
-    if (empty($password)) {
-        $error = 'No dashboard_password set in config.yaml. Access denied.';
-    } elseif (hash_equals($password, $submitted)) {
+    if (empty($passwordHash)) {
+        $error = 'No password hash found. Run: php schema.php --init';
+    } elseif (password_verify($submitted, $passwordHash)) {
         session_regenerate_id(true);
         $_SESSION['rt_authed'] = true;
         header('Location: dashboard.php');
         exit;
     } else {
-        // Small delay to slow brute-force
         sleep(1);
         $error = 'Incorrect password.';
     }
@@ -124,11 +124,7 @@ button:hover { background: #4a6ee0; }
   <p class="subtitle">Sign in to view your traffic dashboard</p>
 
   <?php if ($error): ?>
-
-```
-<div class="error"><?= htmlspecialchars($error) ?></div>
-```
-
+  <div class="error"><?= htmlspecialchars($error) ?></div>
   <?php endif; ?>
 
   <form method="post" action="login.php">

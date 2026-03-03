@@ -317,6 +317,67 @@ tbody td { padding: 9px 14px; vertical-align: middle; }
   font-size: 11px;
 }
 
+/* ─── Advisor Cards ─────────────────────────────────────────────────────── */
+.advisor-card {
+  border-left: 3px solid var(--accent);
+}
+
+.advisor-departure {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 10px 0 6px;
+}
+
+.advisor-leave-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.advisor-leave-time {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -.02em;
+}
+
+.advisor-countdown {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--green);
+}
+.advisor-countdown.urgent { color: var(--red); }
+.advisor-countdown.muted  { color: var(--muted); }
+
+.advisor-days {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 4px 0;
+}
+
+.advisor-stages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.advisor-stage {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: capitalize;
+  letter-spacing: .02em;
+}
+.advisor-stage.fired   { background: rgba(52,211,153,.15); color: var(--green); }
+.advisor-stage.pending { background: var(--card); color: var(--muted); border: 1px solid var(--border); }
+
+.muted-text { color: var(--muted); }
+
 /* ─── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .header  { padding: 10px 14px; }

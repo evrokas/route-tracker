@@ -1,0 +1,564 @@
+// settings.js — Route Tracker v3
+// AJAX handlers for the settings admin UI
+
+// ═══════════════════════════════════════════════════════════════════════════
+// API helper
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function apiGet(params = {}) {
+  const p = new URLSearchParams(params);
+  const resp = await fetch(`${API_BASE}?${p}`, { credentials: 'same-origin' });
+  if (resp.status === 401) { window.location.href = 'login.php'; return null; }
+  return resp.json();
+}
+
+async function apiPost(action, body = {}) {
+  const resp = await fetch(`${API_BASE}?action=${action}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (resp.status === 401) { window.location.href = 'login.php'; return null; }
+  return resp.json();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tab switching
+// ═══════════════════════════════════════════════════════════════════════════
+
+let currentTab = 'general';
+
+function switchTab(tabName) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${tabName}"]`)?.classList.add('active');
+  currentTab = tabName;
+  renderTab(tabName);
+}
+
+async function renderTab(tab) {
+  const box  = document.getElementById('settingsContent');
+  const tpl  = document.getElementById('tpl' + tab.charAt(0).toUpperCase() + tab.slice(1));
+  if (!tpl) return;
+
+  box.innerHTML = '';
+  box.appendChild(tpl.content.cloneNode(true));
+
+  switch (tab) {
+    case 'general': await loadGeneral(); break;
+    case 'routes':  await loadRoutes();  break;
+    case 'alerts':  await loadAlerts();  break;
+    case 'system':  await loadSystem();  break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// General tab
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadGeneral() {
+  const data = await apiGet({ action: 'get_settings' });
+  if (!data) return;
+  const s = data.settings || {};
+
+  setVal('google_maps_api_key',    s.google_maps_api_key    || '');
+  setVal('google_maps_language',   s.google_maps_language   || 'el');
+  setVal('google_maps_region',     s.google_maps_region     || 'gr');
+  setVal('timezone',               s.timezone               || 'Europe/Athens');
+  setVal('window_before_minutes',  s.window_before_minutes  || '15');
+  setVal('window_after_minutes',   s.window_after_minutes   || '5');
+  setCheck('request_alternatives', s.request_alternatives   === '1');
+}
+
+async function saveGeneral() {
+  const settings = {
+    google_maps_api_key:    getVal('google_maps_api_key'),
+    google_maps_language:   getVal('google_maps_language'),
+    google_maps_region:     getVal('google_maps_region'),
+    timezone:               getVal('timezone'),
+    window_before_minutes:  getVal('window_before_minutes'),
+    window_after_minutes:   getVal('window_after_minutes'),
+    request_alternatives:   getCheck('request_alternatives') ? '1' : '0',
+  };
+
+  const result = await apiPost('save_setting', { settings });
+  showStatus('generalStatus', result?.ok ? 'Saved!' : ('Error: ' + (result?.error || '?')), result?.ok);
+}
+
+async function testApiKey() {
+  const key = getVal('google_maps_api_key');
+  if (!key) { alert('Enter an API key first.'); return; }
+
+  // Try a test collection for the first available route
+  const routes = await apiGet({ action: 'route_list' });
+  const rid = routes?.routes?.[0]?.id;
+  if (!rid) { alert('Add a route first, then test the API key.'); return; }
+
+  showStatus('generalStatus', 'Testing…', null);
+  const result = await apiGet({ action: 'test_collection', route_id: rid });
+  if (result?.status === 'OK') {
+    showStatus('generalStatus', `API OK — ${result.routes?.length || 0} routes returned`, true);
+  } else {
+    showStatus('generalStatus', `API returned: ${result?.status || result?.error || 'error'}`, false);
+  }
+}
+
+async function changePassword() {
+  const current = getVal('pw_current');
+  const newPw   = getVal('pw_new');
+  const confirm = getVal('pw_confirm');
+
+  if (!current || !newPw || !confirm) {
+    showStatus('generalStatus', 'Fill in all password fields', false);
+    return;
+  }
+
+  const result = await apiPost('change_password', { current, new_password: newPw, confirm });
+  showStatus('generalStatus', result?.ok ? 'Password changed!' : ('Error: ' + (result?.error || '?')), result?.ok);
+
+  if (result?.ok) {
+    setVal('pw_current', '');
+    setVal('pw_new', '');
+    setVal('pw_confirm', '');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Routes tab
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadRoutes() {
+  const data = await apiGet({ action: 'route_list', all: 1 });
+  renderRouteList(data?.routes || []);
+}
+
+function renderRouteList(routes) {
+  const box = document.getElementById('routesList');
+  if (!box) return;
+
+  if (!routes.length) {
+    box.innerHTML = '<div class="empty">No routes yet. Click "+ Add Route" to create one.</div>';
+    return;
+  }
+
+  let html = '<div class="routes-table"><table>';
+  html += '<thead><tr><th>ID</th><th>Label</th><th>Origin → Destination</th><th>Advisor</th><th>Actions</th></tr></thead><tbody>';
+  for (const r of routes) {
+    html += `<tr>
+      <td><code>${r.id}</code></td>
+      <td>${escHtml(r.label)}</td>
+      <td style="font-size:12px;color:var(--muted)">${escHtml(r.origin||'')} → ${escHtml(r.destination||'')}</td>
+      <td>${r.advisor_enabled ? '✓' : '–'}</td>
+      <td>
+        <button class="btn-tiny" onclick='showRouteForm(${JSON.stringify(r).replace(/</g,'&lt;')})'>Edit</button>
+        <button class="btn-tiny btn-danger" onclick="deleteRoute('${escHtml(r.id)}', '${escHtml(r.label)}')">Delete</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table></div>';
+  box.innerHTML = html;
+}
+
+function showRouteForm(route) {
+  const wrap = document.getElementById('routeFormWrap');
+  if (!wrap) return;
+  wrap.style.display = 'block';
+
+  const r = route || {
+    id: '', label: '', origin: '', destination: '', travel_mode: 'driving',
+    schedule: [], advisor_enabled: false, advisor_start_before: 90,
+    advisor_buffer_mode: 'auto', advisor_fixed_buffer: 10,
+    advisor_stages: ['planning','window','reminder','urgent','last_call'],
+    alert_channels: [], active: true,
+  };
+
+  const allChannels  = ['telegram','email','viber','signal'];
+  const stageOptions = ['planning','window','reminder','urgent','last_call'];
+
+  const schedHtml = (r.schedule || []).map((s, i) => buildSchedRow(s, i)).join('');
+
+  const channelCheckboxes = allChannels.map(ch => `
+    <label class="checkbox-label">
+      <input type="checkbox" name="alert_ch" value="${ch}" ${(r.alert_channels||[]).includes(ch) ? 'checked' : ''}>
+      ${ch}
+    </label>`).join('');
+
+  const stageCheckboxes = stageOptions.map(st => `
+    <label class="checkbox-label">
+      <input type="checkbox" name="adv_stage" value="${st}" ${(r.advisor_stages||[]).includes(st) ? 'checked' : ''}>
+      ${st}
+    </label>`).join('');
+
+  wrap.innerHTML = `
+    <div class="settings-section route-form">
+      <div class="section-title">${route ? 'Edit Route' : 'Add New Route'}</div>
+
+      <div class="field-row-2">
+        <div class="field-group">
+          <label>Route ID (slug)</label>
+          <input type="text" id="rf_id" value="${escHtml(r.id)}" placeholder="my_commute" ${route ? 'readonly' : ''}>
+          <div class="field-hint">Lowercase letters, numbers, underscores only</div>
+        </div>
+        <div class="field-group">
+          <label>Label</label>
+          <input type="text" id="rf_label" value="${escHtml(r.label)}" placeholder="Home → Work">
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label>Origin</label>
+        <input type="text" id="rf_origin" value="${escHtml(r.origin)}" placeholder="37.9838, 23.7275 or full address">
+      </div>
+      <div class="field-group">
+        <label>Destination</label>
+        <input type="text" id="rf_dest" value="${escHtml(r.destination)}" placeholder="37.9838, 23.7275 or full address">
+      </div>
+      <div class="field-group">
+        <label>Travel Mode</label>
+        <select id="rf_mode">
+          ${['driving','walking','bicycling','transit'].map(m =>
+            `<option value="${m}" ${r.travel_mode===m?'selected':''}>${m}</option>`
+          ).join('')}
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label>Schedule</label>
+        <div id="rf_schedule">${schedHtml}</div>
+        <button class="btn-tiny" onclick="addSchedRow()" style="margin-top:6px">+ Add Schedule Entry</button>
+      </div>
+
+      <details class="advisor-details" ${r.advisor_enabled ? 'open' : ''}>
+        <summary>Departure Advisor</summary>
+        <div class="advisor-fields">
+          <label class="checkbox-label">
+            <input type="checkbox" id="rf_adv_enabled" ${r.advisor_enabled ? 'checked' : ''}>
+            Enable advisor for this route
+          </label>
+          <div class="field-row-2">
+            <div class="field-group">
+              <label>Start checking X minutes before arrival</label>
+              <input type="number" id="rf_adv_start" value="${r.advisor_start_before||90}" min="15" max="180">
+            </div>
+            <div class="field-group">
+              <label>Buffer mode</label>
+              <select id="rf_adv_mode">
+                <option value="auto" ${r.advisor_buffer_mode==='auto'?'selected':''}>Auto (from historical variance)</option>
+                <option value="fixed" ${r.advisor_buffer_mode==='fixed'?'selected':''}>Fixed</option>
+              </select>
+            </div>
+          </div>
+          <div class="field-group">
+            <label>Fixed buffer (minutes, used if mode=Fixed)</label>
+            <input type="number" id="rf_adv_fixed" value="${r.advisor_fixed_buffer||10}" min="0" max="60">
+          </div>
+          <div class="field-group">
+            <label>Alert stages</label>
+            <div class="checkbox-row">${stageCheckboxes}</div>
+          </div>
+        </div>
+      </details>
+
+      <div class="field-group">
+        <label>Alert channels</label>
+        <div class="checkbox-row">${channelCheckboxes}</div>
+      </div>
+
+      <label class="checkbox-label">
+        <input type="checkbox" id="rf_active" ${r.active ? 'checked' : ''}>
+        Active (include in scheduled collection)
+      </label>
+
+      <div class="form-actions">
+        <button class="btn-primary" onclick="saveRoute('${escHtml(r.id || '')}')">Save Route</button>
+        <button class="btn-secondary" onclick="cancelRouteForm()">Cancel</button>
+        <span id="routeFormStatus" class="save-status"></span>
+      </div>
+    </div>`;
+
+  wrap.scrollIntoView({ behavior: 'smooth' });
+}
+
+function buildSchedRow(s, idx) {
+  const days = ['Weekdays','Weekends','All','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const mode = s.arrive ? 'arrive' : 'depart';
+  const time = s.arrive || s.depart || '';
+  return `<div class="sched-row" data-idx="${idx}">
+    <select class="sched-days">
+      ${days.map(d => `<option ${s.days===d?'selected':''}>${d}</option>`).join('')}
+    </select>
+    <select class="sched-mode">
+      <option value="arrive" ${mode==='arrive'?'selected':''}>arrive by</option>
+      <option value="depart" ${mode==='depart'?'selected':''}>depart at</option>
+    </select>
+    <input type="text" class="sched-time" value="${escHtml(time)}" placeholder="HH:MM" maxlength="5" pattern="\\d{2}:\\d{2}">
+    <button class="btn-tiny btn-danger" onclick="this.closest('.sched-row').remove()">−</button>
+  </div>`;
+}
+
+function addSchedRow() {
+  const container = document.getElementById('rf_schedule');
+  if (!container) return;
+  const idx = container.querySelectorAll('.sched-row').length;
+  container.insertAdjacentHTML('beforeend', buildSchedRow({days:'Weekdays'}, idx));
+}
+
+function getScheduleFromForm() {
+  const rows = document.querySelectorAll('#rf_schedule .sched-row');
+  const schedule = [];
+  rows.forEach(row => {
+    const days = row.querySelector('.sched-days')?.value;
+    const mode = row.querySelector('.sched-mode')?.value;
+    const time = row.querySelector('.sched-time')?.value?.trim();
+    if (days && mode && time) {
+      const entry = { days };
+      entry[mode] = time;
+      schedule.push(entry);
+    }
+  });
+  return schedule;
+}
+
+async function saveRoute(originalId) {
+  const id    = getVal('rf_id').trim();
+  const label = getVal('rf_label').trim();
+
+  if (!id || !label) {
+    showStatus('routeFormStatus', 'ID and Label are required', false);
+    return;
+  }
+
+  const alertChannels = [...document.querySelectorAll('input[name="alert_ch"]:checked')].map(el => el.value);
+  const advisorStages = [...document.querySelectorAll('input[name="adv_stage"]:checked')].map(el => el.value);
+
+  const route = {
+    id,
+    label,
+    origin:               getVal('rf_origin'),
+    destination:          getVal('rf_dest'),
+    travel_mode:          getVal('rf_mode'),
+    schedule:             getScheduleFromForm(),
+    advisor_enabled:      document.getElementById('rf_adv_enabled')?.checked ? 1 : 0,
+    advisor_start_before: parseInt(getVal('rf_adv_start')) || 90,
+    advisor_buffer_mode:  getVal('rf_adv_mode'),
+    advisor_fixed_buffer: parseInt(getVal('rf_adv_fixed')) || 10,
+    advisor_stages:       advisorStages,
+    alert_channels:       alertChannels,
+    active:               document.getElementById('rf_active')?.checked ? 1 : 0,
+  };
+
+  const result = await apiPost('save_route', route);
+  if (result?.ok) {
+    showStatus('routeFormStatus', 'Saved!', true);
+    setTimeout(() => { cancelRouteForm(); loadRoutes(); }, 800);
+  } else {
+    showStatus('routeFormStatus', 'Error: ' + (result?.error || '?'), false);
+  }
+}
+
+function cancelRouteForm() {
+  const wrap = document.getElementById('routeFormWrap');
+  if (wrap) { wrap.style.display = 'none'; wrap.innerHTML = ''; }
+}
+
+async function deleteRoute(id, label) {
+  if (!confirm(`Delete route "${label}"?\n\nThis will NOT delete historical trip data.`)) return;
+  const result = await apiPost('delete_route', { id });
+  if (result?.ok) {
+    loadRoutes();
+  } else {
+    alert('Error: ' + (result?.error || 'Delete failed'));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Alerts tab
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadAlerts() {
+  const data = await apiGet({ action: 'get_settings' });
+  if (!data) return;
+  const s = data.settings || {};
+
+  setVal('alert_traffic_threshold', s.alert_traffic_threshold || '30');
+  setVal('alert_min_samples',       s.alert_min_samples       || '5');
+  setVal('alert_max_per_day',       s.alert_max_per_day       || '3');
+
+  const channels = ['telegram','email','viber','signal'];
+  channels.forEach(ch => {
+    const enabled = s[`${ch}_enabled`] === '1';
+    setCheck(`${ch}_enabled`, enabled);
+    toggleChannel(ch, enabled);
+  });
+
+  setVal('telegram_bot_token',   s.telegram_bot_token   || '');
+  setVal('telegram_chat_ids',    s.telegram_chat_ids    || '');
+  setVal('email_host',           s.email_host           || '');
+  setVal('email_port',           s.email_port           || '587');
+  setVal('email_user',           s.email_user           || '');
+  setVal('email_pass',           s.email_pass           || '');
+  setVal('email_from',           s.email_from           || '');
+  setVal('email_to',             s.email_to             || '');
+  setVal('viber_auth_token',     s.viber_auth_token     || '');
+  setVal('viber_receiver_ids',   s.viber_receiver_ids   || '');
+  setVal('signal_api_url',       s.signal_api_url       || '');
+  setVal('signal_sender',        s.signal_sender        || '');
+  setVal('signal_recipients',    s.signal_recipients    || '');
+}
+
+function toggleChannel(channel, enabled) {
+  const fields = document.getElementById(`fields-${channel}`);
+  if (fields) fields.style.display = enabled ? '' : 'none';
+}
+
+async function saveAlerts() {
+  const settings = {
+    alert_traffic_threshold: getVal('alert_traffic_threshold'),
+    alert_min_samples:       getVal('alert_min_samples'),
+    alert_max_per_day:       getVal('alert_max_per_day'),
+    telegram_enabled:        getCheck('telegram_enabled') ? '1' : '0',
+    telegram_bot_token:      getVal('telegram_bot_token'),
+    telegram_chat_ids:       getVal('telegram_chat_ids'),
+    email_enabled:           getCheck('email_enabled') ? '1' : '0',
+    email_host:              getVal('email_host'),
+    email_port:              getVal('email_port'),
+    email_user:              getVal('email_user'),
+    email_pass:              getVal('email_pass'),
+    email_from:              getVal('email_from'),
+    email_to:                getVal('email_to'),
+    viber_enabled:           getCheck('viber_enabled') ? '1' : '0',
+    viber_auth_token:        getVal('viber_auth_token'),
+    viber_receiver_ids:      getVal('viber_receiver_ids'),
+    signal_enabled:          getCheck('signal_enabled') ? '1' : '0',
+    signal_api_url:          getVal('signal_api_url'),
+    signal_sender:           getVal('signal_sender'),
+    signal_recipients:       getVal('signal_recipients'),
+  };
+
+  const result = await apiPost('save_setting', { settings });
+  showStatus('alertStatus', result?.ok ? 'Saved!' : ('Error: ' + (result?.error || '?')), result?.ok);
+}
+
+async function testChannel(channel) {
+  const result = await apiPost('test_alert', { channel });
+  alert(result?.ok ? `✓ ${result.message}` : `✗ ${result?.message || 'Failed'}`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// System tab
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function loadSystem() {
+  // Load route list for dropdown
+  const data = await apiGet({ action: 'route_list' });
+  const sel  = document.getElementById('testRouteId');
+  if (sel && data?.routes) {
+    data.routes.forEach(r => {
+      const opt = document.createElement('option');
+      opt.value       = r.id;
+      opt.textContent = r.label;
+      sel.appendChild(opt);
+    });
+  }
+
+  // Load DB stats
+  await loadDbStats();
+
+  // Load collector log by default
+  await loadLog('collector');
+}
+
+async function loadDbStats() {
+  const data = await apiGet({ action: 'db_stats' });
+  const box  = document.getElementById('dbStats');
+  if (!box || !data) return;
+
+  const size = data.db_size_bytes > 1048576
+    ? (data.db_size_bytes / 1048576).toFixed(1) + ' MB'
+    : (data.db_size_bytes / 1024).toFixed(0) + ' KB';
+
+  box.innerHTML = `
+    <div class="stat-chip"><label>Trips</label><span>${data.trip_count.toLocaleString()}</span></div>
+    <div class="stat-chip"><label>Active Routes</label><span>${data.route_count}</span></div>
+    <div class="stat-chip"><label>First Trip</label><span>${data.first_trip ? data.first_trip.substring(0,10) : '–'}</span></div>
+    <div class="stat-chip"><label>Last Trip</label><span>${data.last_trip ? data.last_trip.substring(0,10) : '–'}</span></div>
+    <div class="stat-chip"><label>DB Size</label><span>${size}</span></div>`;
+}
+
+async function runTestCollection() {
+  const rid = document.getElementById('testRouteId')?.value;
+  if (!rid) { alert('Select a route first.'); return; }
+
+  const box = document.getElementById('testResult');
+  if (box) { box.style.display = 'block'; box.textContent = 'Running…'; }
+
+  const result = await apiGet({ action: 'test_collection', route_id: rid });
+  if (!box) return;
+
+  if (!result) { box.textContent = 'Error: no response'; return; }
+
+  let txt = `Route: ${result.label}\nStatus: ${result.status}\n`;
+  if (result.error) txt += `Error: ${result.error}\n`;
+  (result.routes || []).forEach((r, i) => {
+    txt += `\n${i === 0 ? '★ PRIMARY' : '  ALT ' + i}: ${r.summary}\n`;
+    txt += `  Duration: ${r.duration}  Traffic: ${r.traffic || 'n/a'}  Distance: ${r.distance}\n`;
+  });
+  box.textContent = txt;
+}
+
+async function runAdvisor() {
+  const result = await apiGet({ action: 'run_advisor' });
+  alert(result?.ran_for?.length
+    ? `Advisor ran for: ${result.ran_for.join(', ')}`
+    : 'Advisor ran (no advisor-enabled routes in window)');
+}
+
+function exportTrips() {
+  window.location.href = `${API_BASE}?action=export_trips`;
+}
+
+async function loadLog(type, btn) {
+  // Update active tab button
+  document.querySelectorAll('.log-tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+
+  const data = await apiGet({ action: 'get_logs', type });
+  const box  = document.getElementById('logBox');
+  if (!box) return;
+  box.textContent = data?.log?.join('\n') || '(no log entries)';
+  box.scrollTop   = box.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════════════
+
+function getVal(id)         { return document.getElementById(id)?.value ?? ''; }
+function setVal(id, v)      { const el = document.getElementById(id); if (el) el.value = v; }
+function getCheck(id)       { return document.getElementById(id)?.checked ?? false; }
+function setCheck(id, v)    { const el = document.getElementById(id); if (el) el.checked = v; }
+
+function showStatus(id, msg, ok) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.className   = 'save-status ' + (ok === true ? 'ok' : ok === false ? 'err' : '');
+  if (ok === true) {
+    setTimeout(() => { el.textContent = ''; el.className = 'save-status'; }, 3000);
+  }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Init
+// ═══════════════════════════════════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.tab').forEach(t => {
+    t.addEventListener('click', () => switchTab(t.dataset.tab));
+  });
+  renderTab('general');
+});

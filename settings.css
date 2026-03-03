@@ -1,0 +1,348 @@
+/* settings.css — Route Tracker v3 */
+
+/* ─── Settings layout ────────────────────────────────────────────────────── */
+
+.settings-content {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 24px 60px;
+}
+
+.btn-link {
+  font-size: 13px;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  transition: color .15s;
+}
+.btn-link:hover { color: var(--text); }
+
+/* ─── Section ────────────────────────────────────────────────────────────── */
+
+.settings-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px 24px;
+  margin-bottom: 16px;
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-title-row .section-title {
+  margin-bottom: 0;
+}
+
+/* ─── Field groups ───────────────────────────────────────────────────────── */
+
+.field-group {
+  margin-bottom: 14px;
+}
+
+.field-group:last-child { margin-bottom: 0; }
+
+.field-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+
+.field-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.field-group input[type=text],
+.field-group input[type=password],
+.field-group input[type=number],
+.field-group input[type=email],
+.field-group select,
+input[type=text].sched-time {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+  outline: none;
+  transition: border-color .15s;
+}
+
+.field-group input:focus,
+.field-group select:focus { border-color: var(--accent); }
+
+.field-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.field-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.field-row-3 {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 600px) {
+  .field-row-2, .field-row-3 { grid-template-columns: 1fr; }
+}
+
+/* ─── Buttons ────────────────────────────────────────────────────────────── */
+
+.btn-primary {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  font-weight: 600;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: background .15s;
+}
+.btn-primary:hover { background: #4a6ee0; }
+
+.btn-secondary {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: border-color .15s;
+}
+.btn-secondary:hover { border-color: var(--accent); }
+
+.btn-tiny {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.btn-tiny:hover { border-color: var(--accent); }
+.btn-tiny.btn-danger { color: var(--red); }
+.btn-tiny.btn-danger:hover { border-color: var(--red); }
+
+/* ─── Footer ─────────────────────────────────────────────────────────────── */
+
+.settings-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+}
+
+.save-status {
+  font-size: 12px;
+  color: var(--muted);
+}
+.save-status.ok  { color: var(--green); }
+.save-status.err { color: var(--red); }
+
+/* ─── Checkbox / Toggle ──────────────────────────────────────────────────── */
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 8px;
+}
+.checkbox-label input[type=checkbox] { width: 15px; height: 15px; cursor: pointer; }
+
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+/* Toggle switch */
+.toggle-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  margin-left: auto;
+}
+.toggle-label input[type=checkbox] { display: none; }
+.toggle {
+  width: 40px; height: 22px;
+  background: var(--border);
+  border-radius: 11px;
+  position: relative;
+  transition: background .2s;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 3px; left: 3px;
+  width: 16px; height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  transition: left .2s;
+}
+.toggle-label input:checked + .toggle { background: var(--accent); }
+.toggle-label input:checked + .toggle::after { left: 21px; }
+
+/* ─── Channel cards ──────────────────────────────────────────────────────── */
+
+.channel-card { }
+
+.channel-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.channel-icon { font-size: 18px; }
+.channel-name { font-size: 15px; font-weight: 600; }
+
+.channel-fields {
+  padding-top: 4px;
+}
+
+/* ─── Routes table ───────────────────────────────────────────────────────── */
+
+.routes-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.routes-table th {
+  text-align: left;
+  padding: 6px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+.routes-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.routes-table tr:last-child td { border-bottom: none; }
+
+/* ─── Route form ─────────────────────────────────────────────────────────── */
+
+.route-form { border: 2px solid var(--accent); }
+
+.sched-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.sched-row select, .sched-row input { flex: 1; margin-bottom: 0; }
+.sched-row input.sched-time { flex: 0.5; min-width: 80px; }
+
+.advisor-details summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 10px 0 6px;
+  user-select: none;
+}
+.advisor-fields { padding-top: 10px; }
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  margin-top: 16px;
+}
+
+/* ─── System tab ─────────────────────────────────────────────────────────── */
+
+.stats-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.stat-chip {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  min-width: 100px;
+}
+.stat-chip label {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.stat-chip span {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.log-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #94a3b8;
+  max-height: 320px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-top: 10px;
+}
+
+.log-tabs {
+  display: flex;
+  gap: 4px;
+}
+.log-tab-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--font);
+}
+.log-tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+#testResult { margin-top: 12px; }

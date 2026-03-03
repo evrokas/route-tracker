@@ -1,38 +1,31 @@
 <?php
 /**
- * dashboard.php — Route Tracker v2
- * Session-authenticated dashboard. No credentials are sent to the browser.
+ * dashboard.php — Route Tracker v3
+ * Session-authenticated dashboard.
  */
 
 $baseDir = __DIR__;
 require_once $baseDir . '/Config.php';
 require_once $baseDir . '/auth.php';
 
-// ─── Require login ────────────────────────────────────────────────────────────
 Auth::requireLogin();
 
-// ─── Handle logout ────────────────────────────────────────────────────────────
 if (isset($_GET['logout'])) {
     Auth::logout();
     header('Location: login.php');
     exit;
 }
 
-// ─── Load config ─────────────────────────────────────────────────────────────
-$configError = null;
 try {
     $config = Config::load($baseDir);
 } catch (Exception $e) {
-    $configError = $e->getMessage();
+    die('<pre>Config error: ' . htmlspecialchars($e->getMessage()) . "\n\nRun: php schema.php --init</pre>");
 }
 
-// API_BASE is just a relative path — safe to expose
-// API_TOKEN is NOT injected; api.php validates via session instead
 $apiBase = 'api.php';
 ?>
 
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -41,14 +34,6 @@ $apiBase = 'api.php';
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
-
-<?php if ($configError): ?>
-
-<div style="background:#7f1d1d;color:#fecaca;padding:16px 24px;font-family:monospace;font-size:13px;border-bottom:1px solid #991b1b;">
-  <strong>⚠ Configuration Error:</strong> <?= htmlspecialchars($configError) ?><br>
-  Check that <code>config.yaml</code>, <code>routes.yaml</code>, and <code>alerts.yaml</code> exist and are valid YAML.
-</div>
-<?php endif; ?>
 
 <!-- ─── HEADER ──────────────────────────────────────────────────────────── -->
 
@@ -67,6 +52,7 @@ $apiBase = 'api.php';
     </select>
     <button class="primary" onclick="refresh()">↺ Refresh</button>
     <span id="filterBadge" style="display:none;background:#5b7cf6;color:#fff;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;"></span>
+    <a href="settings.php" style="font-size:12px;color:var(--muted);text-decoration:none;padding:6px 10px;">⚙️ Settings</a>
     <a href="?logout=1" style="font-size:12px;color:var(--muted);text-decoration:none;padding:6px 10px;">Sign out</a>
     <span id="statusWrap">
       <span class="status-dot" id="statusDot"></span>
@@ -84,7 +70,8 @@ $apiBase = 'api.php';
 <!-- ─── TAB BAR ────────────────────────────────────────────────────────── -->
 
 <div class="tab-bar">
-  <button class="tab active" data-tab="overview">Overview</button>
+  <button class="tab active" data-tab="advisor">Advisor</button>
+  <button class="tab" data-tab="overview">Overview</button>
   <button class="tab" data-tab="best">Best Routes</button>
   <button class="tab" data-tab="byday">By Day</button>
   <button class="tab" data-tab="trends">Trends</button>
@@ -97,15 +84,12 @@ $apiBase = 'api.php';
   <div class="loading"><div class="spinner"></div>Loading…</div>
 </div>
 
-<!-- ─── Only the base URL is injected — no token, no secrets ────────────── -->
-
 <script>
   const API_BASE  = <?= json_encode($apiBase) ?>;
-  const API_TOKEN = '';   // Not used — auth is handled via PHP session cookie
+  const API_TOKEN = '';
 </script>
 
 <script src="dashboard.js"></script>
 
 </body>
 </html>
-

@@ -1,17 +1,24 @@
 <?php
 
 /**
- * Config.php — Route Tracker v2
- * YAML configuration loader + schedule logic
+ * Config.php — Route Tracker v3
+ * SQLite-backed configuration loader. Replaces YAML-based v2 loader.
+ *
+ * All settings come from the `settings` table; routes from the `routes` table.
+ * Public method signatures are preserved for backward compatibility.
  */
 
 class Config
 {
     private static ?Config $instance = null;
     private string $baseDir;
-    private array $config  = [];
-    private array $routes  = [];
-    private array $alerts  = [];
+    private PDO    $pdo;
+
+    /** @var array<string,string> Settings cache (key → value) */
+    private array $settings = [];
+
+    /** @var array[]|null Routes cache */
+    private ?array $routesCache = null;
 
     // Day name → ISO day number (1=Mon .. 7=Sun)
     private const DAY_MAP = [
@@ -22,7 +29,8 @@ class Config
     private function __construct(string $baseDir)
     {
         $this->baseDir = rtrim($baseDir, '/');
-        $this->loadYaml();
+        $this->openDb();
+        $this->loadSettings();
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -45,111 +53,157 @@ class Config
         return self::$instance;
     }
 
+    /** Reset singleton (useful for testing or after DB re-init). */
+    public static function reset(): void
+    {
+        self::$instance = null;
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Internal loading
     // ──────────────────────────────────────────────────────────────────────────
 
-    private function loadYaml(): void
+    private function openDb(): void
     {
-        if (!function_exists('yaml_parse_file')) {
+        $dbPath = $this->getDbPath();
+        $dbDir  = dirname($dbPath);
+
+        if (!is_dir($dbDir)) {
             throw new RuntimeException(
-                "PHP yaml extension not available.\n" .
-                "Install: sudo apt install php-dev php-pear libyaml-dev && sudo pecl install yaml"
+                "Data directory does not exist: {$dbDir}\n" .
+                "Run: php schema.php --init"
             );
         }
 
-        $this->config = $this->parseYaml('config.yaml');
-        $this->routes = $this->parseYaml('routes.yaml');
-        $this->alerts = $this->parseYaml('alerts.yaml');
+        if (!file_exists($dbPath)) {
+            throw new RuntimeException(
+                "Database not found: {$dbPath}\n" .
+                "Run: php schema.php --init"
+            );
+        }
+
+        $this->pdo = new PDO("sqlite:{$dbPath}");
+        $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $this->pdo->exec('PRAGMA journal_mode=WAL;');
+        $this->pdo->exec('PRAGMA foreign_keys=ON;');
     }
 
-    private function parseYaml(string $filename): array
+    private function loadSettings(): void
     {
-        $path = "{$this->baseDir}/{$filename}";
-        if (!file_exists($path)) {
-            throw new RuntimeException("Configuration file not found: {$path}");
+        try {
+            $rows = $this->pdo->query("SELECT key, value FROM settings")->fetchAll(PDO::FETCH_KEY_PAIR);
+            $this->settings = is_array($rows) ? $rows : [];
+        } catch (Exception $e) {
+            throw new RuntimeException(
+                "Could not read settings table. Run: php schema.php --init\n(" . $e->getMessage() . ")"
+            );
         }
-        $data = yaml_parse_file($path);
-        if ($data === false) {
-            throw new RuntimeException("Failed to parse YAML: {$path}");
-        }
-        return is_array($data) ? $data : [];
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Generic dot-notation getter
+    // Generic dot-notation getter (reads from settings table)
     // ──────────────────────────────────────────────────────────────────────────
 
     public function get(string $dotKey, $default = null)
     {
-        $keys = explode('.', $dotKey);
+        // In v3 the dotKey IS the settings table key (no nesting needed)
+        // Legacy dot-keys like 'google_maps.api_key' → 'google_maps_api_key'
+        $flat = str_replace('.', '_', $dotKey);
 
-        // Try all three config arrays
-        foreach ([$this->config, $this->routes, $this->alerts] as $src) {
-            $val = $this->dotGet($src, $keys);
-            if ($val !== null) {
-                return $val;
-            }
+        if (array_key_exists($flat, $this->settings)) {
+            return $this->settings[$flat];
         }
+
+        // Also try the original key as-is
+        if (array_key_exists($dotKey, $this->settings)) {
+            return $this->settings[$dotKey];
+        }
+
         return $default;
     }
 
-    private function dotGet(array $arr, array $keys)
+    public function getSetting(string $key, string $default = ''): string
     {
-        $cur = $arr;
-        foreach ($keys as $k) {
-            if (!is_array($cur) || !array_key_exists($k, $cur)) {
-                return null;
+        return (string)($this->settings[$key] ?? $default);
+    }
+
+    public function setSetting(string $key, string $value): void
+    {
+        $st = $this->pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (:key, :value)");
+        $st->execute([':key' => $key, ':value' => $value]);
+        $this->settings[$key] = $value;
+    }
+
+    public function setSettings(array $pairs): void
+    {
+        $st = $this->pdo->prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (:key, :value)");
+        $this->pdo->beginTransaction();
+        try {
+            foreach ($pairs as $key => $value) {
+                $st->execute([':key' => $key, ':value' => (string)$value]);
+                $this->settings[$key] = (string)$value;
             }
-            $cur = $cur[$k];
+            $this->pdo->commit();
+        } catch (Exception $e) {
+            $this->pdo->rollBack();
+            throw $e;
         }
-        return $cur;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Convenience getters
+    // Convenience getters (preserve v2 interface)
     // ──────────────────────────────────────────────────────────────────────────
 
     public function getApiKey(): string
     {
-        return (string)($this->config['google_maps']['api_key'] ?? '');
+        return $this->getSetting('google_maps_api_key');
     }
 
+    /** @deprecated Legacy; kept for compatibility. Always empty in v3. */
     public function getApiToken(): string
     {
-        return (string)($this->config['api_token'] ?? '');
+        return '';
     }
-    
-    public function getDashboardPassword(): string  { return (string)($this->config['dashboard_password'] ?? ''); }
+
+    public function getDashboardPasswordHash(): string
+    {
+        return $this->getSetting('dashboard_password_hash');
+    }
+
+    /** @deprecated Use getDashboardPasswordHash(). Kept for login.php compatibility. */
+    public function getDashboardPassword(): string
+    {
+        return $this->getDashboardPasswordHash();
+    }
 
     public function getDbPath(): string
     {
-        $rel = $this->config['database']['path'] ?? 'data/routes.sqlite';
-        // If already absolute, return as-is
-        if ($rel[0] === '/') {
-            return $rel;
-        }
-        return $this->baseDir . '/' . $rel;
+        return $this->baseDir . '/data/routes.sqlite';
+    }
+
+    public function getPdo(): PDO
+    {
+        return $this->pdo;
     }
 
     public function getTimezone(): string
     {
-        return (string)($this->config['timezone'] ?? 'Europe/Athens');
+        return $this->getSetting('timezone', 'Europe/Athens');
     }
 
     public function getCollectionWindowBefore(): int
     {
-        return (int)($this->config['collection']['window_before_minutes'] ?? 15);
+        return (int)$this->getSetting('window_before_minutes', '15');
     }
 
     public function getCollectionWindowAfter(): int
     {
-        return (int)($this->config['collection']['window_after_minutes'] ?? 5);
+        return (int)$this->getSetting('window_after_minutes', '5');
     }
 
     public function requestAlternatives(): bool
     {
-        return (bool)($this->config['collection']['request_alternatives'] ?? true);
+        return (bool)(int)$this->getSetting('request_alternatives', '1');
     }
 
     public function getBaseDir(): string
@@ -158,22 +212,55 @@ class Config
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Route getters
+    // Route getters (query routes table)
     // ──────────────────────────────────────────────────────────────────────────
 
     public function getAllRoutes(): array
     {
-        return $this->routes['routes'] ?? [];
+        if ($this->routesCache !== null) {
+            return $this->routesCache;
+        }
+
+        try {
+            $rows = $this->pdo->query("SELECT * FROM routes ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            return [];
+        }
+
+        $this->routesCache = array_map([$this, 'decodeRoute'], $rows);
+        return $this->routesCache;
+    }
+
+    public function getAllActiveRoutes(): array
+    {
+        try {
+            $rows = $this->pdo->query("SELECT * FROM routes WHERE active = 1 ORDER BY id")
+                              ->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            return [];
+        }
+        return array_map([$this, 'decodeRoute'], $rows);
     }
 
     public function getRoute(string $id): ?array
     {
         foreach ($this->getAllRoutes() as $route) {
-            if (($route['id'] ?? '') === $id) {
+            if ($route['id'] === $id) {
                 return $route;
             }
         }
         return null;
+    }
+
+    /** Decode JSON fields and normalise a route DB row to the v2-compatible array format. */
+    private function decodeRoute(array $row): array
+    {
+        $row['schedule']        = json_decode($row['schedule']        ?? '[]', true) ?: [];
+        $row['advisor_stages']  = json_decode($row['advisor_stages']  ?? '[]', true) ?: [];
+        $row['alert_channels']  = json_decode($row['alert_channels']  ?? '[]', true) ?: [];
+        $row['advisor_enabled'] = (bool)(int)($row['advisor_enabled'] ?? 0);
+        $row['active']          = (bool)(int)($row['active']          ?? 1);
+        return $row;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -194,20 +281,13 @@ class Config
     {
         $lower = strtolower(trim($days));
 
-        if ($lower === 'weekdays') {
-            return [1, 2, 3, 4, 5];
-        }
-        if ($lower === 'weekends') {
-            return [6, 7];
-        }
-        if ($lower === 'all') {
-            return [1, 2, 3, 4, 5, 6, 7];
-        }
+        if ($lower === 'weekdays') return [1, 2, 3, 4, 5];
+        if ($lower === 'weekends') return [6, 7];
+        if ($lower === 'all')      return [1, 2, 3, 4, 5, 6, 7];
 
         $result = [];
         foreach (explode(',', $days) as $part) {
-            $part  = strtolower(trim($part));
-            $short = substr($part, 0, 3);
+            $short = strtolower(substr(trim($part), 0, 3));
             if (isset(self::DAY_MAP[$short])) {
                 $result[] = self::DAY_MAP[$short];
             }
@@ -220,7 +300,7 @@ class Config
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
-     * Return routes that are within their collection window right now.
+     * Return active routes within their collection window right now.
      *
      * @param int|null    $dayOverride  ISO day (1–7). Null = current day.
      * @param string|null $timeOverride "HH:MM". Null = current time.
@@ -231,33 +311,28 @@ class Config
         $now     = time();
         $curDay  = $dayOverride  ?? (int)date('N', $now);
         $curTime = $timeOverride ?? date('H:i', $now);
-
         $before  = $this->getCollectionWindowBefore();
         $after   = $this->getCollectionWindowAfter();
 
         $active = [];
 
-        foreach ($this->getAllRoutes() as $route) {
+        foreach ($this->getAllActiveRoutes() as $route) {
             foreach ($route['schedule'] ?? [] as $sched) {
-                $days      = $this->parseDays($sched['days'] ?? '');
-                $isToday   = in_array($curDay, $days, true);
-                if (!$isToday) {
+                $days    = $this->parseDays($sched['days'] ?? '');
+                if (!in_array($curDay, $days, true)) {
                     continue;
                 }
 
-                // Resolve the collect-at time
                 if (isset($sched['depart'])) {
-                    $collectAt   = $sched['depart'];
+                    $collectAt    = $sched['depart'];
                     $scheduleMode = 'depart';
                 } elseif (isset($sched['arrive'])) {
-                    // Estimate departure time = arrive − 30min − buffer
-                    $collectAt   = $this->estimateDepartureTime($sched['arrive'], $route['id']);
+                    $collectAt    = $this->estimateDepartureTime($sched['arrive']);
                     $scheduleMode = 'arrive';
                 } else {
                     continue;
                 }
 
-                // Check if current time is within the window
                 if ($this->isWithinWindow($curTime, $collectAt, $before, $after)) {
                     $active[] = array_merge($route, [
                         '_schedule'       => $sched,
@@ -265,7 +340,7 @@ class Config
                         '_scheduled_time' => $sched['arrive'] ?? $sched['depart'],
                         '_collect_at'     => $collectAt,
                     ]);
-                    break; // Only add route once even if multiple schedule entries match
+                    break; // only add route once even if multiple entries match
                 }
             }
         }
@@ -273,26 +348,18 @@ class Config
         return $active;
     }
 
-    /**
-     * Estimate when to start collecting for an arrive-mode route.
-     * In future this can query DB for historical average.
-     */
-    private function estimateDepartureTime(string $arriveTime, string $routeId): string
+    private function estimateDepartureTime(string $arriveTime): string
     {
-        // Default estimate: 30 min travel + 15 min buffer
         [$h, $m] = explode(':', $arriveTime);
         $ts = mktime((int)$h, (int)$m, 0);
-        $ts -= (30 + 15) * 60; // 45 min earlier
+        $ts -= 45 * 60; // 45 min earlier
         return date('H:i', $ts);
     }
 
-    /**
-     * Is $currentTime within [$collectAt − $before, $collectAt + $after]?
-     */
     private function isWithinWindow(string $currentTime, string $collectAt, int $before, int $after): bool
     {
-        $cur      = $this->timeToMinutes($currentTime);
-        $collect  = $this->timeToMinutes($collectAt);
+        $cur     = $this->timeToMinutes($currentTime);
+        $collect = $this->timeToMinutes($collectAt);
         return $cur >= ($collect - $before) && $cur <= ($collect + $after);
     }
 
@@ -310,7 +377,7 @@ class Config
     {
         $schedule = [];
 
-        foreach ($this->getAllRoutes() as $route) {
+        foreach ($this->getAllActiveRoutes() as $route) {
             foreach ($route['schedule'] ?? [] as $sched) {
                 $days = $this->parseDays($sched['days'] ?? '');
 
@@ -320,21 +387,21 @@ class Config
                     }
 
                     if (isset($sched['depart'])) {
-                        $mode       = 'depart';
-                        $time       = $sched['depart'];
-                        $collectAt  = $time;
+                        $mode      = 'depart';
+                        $time      = $sched['depart'];
+                        $collectAt = $time;
                     } else {
-                        $mode       = 'arrive';
-                        $time       = $sched['arrive'];
-                        $collectAt  = $this->estimateDepartureTime($time, $route['id']);
+                        $mode      = 'arrive';
+                        $time      = $sched['arrive'];
+                        $collectAt = $this->estimateDepartureTime($time);
                     }
 
                     $schedule[$day][] = [
-                        'route_id'    => $route['id'],
-                        'label'       => $route['label'],
-                        'mode'        => $mode,
-                        'time'        => $time,
-                        'collect_at'  => $collectAt,
+                        'route_id'   => $route['id'],
+                        'label'      => $route['label'],
+                        'mode'       => $mode,
+                        'time'       => $time,
+                        'collect_at' => $collectAt,
                     ];
                 }
             }
@@ -345,31 +412,74 @@ class Config
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Alert config getters
+    // Alert config getters (preserve v2 interface)
     // ──────────────────────────────────────────────────────────────────────────
 
     public function getAlertSettings(): array
     {
-        return $this->alerts['alert_settings'] ?? [
-            'traffic_threshold_percent' => 30,
-            'min_samples_for_alerts'    => 5,
-            'max_alerts_per_day'        => 3,
+        return [
+            'traffic_threshold_percent' => (int)$this->getSetting('alert_traffic_threshold', '30'),
+            'min_samples_for_alerts'    => (int)$this->getSetting('alert_min_samples', '5'),
+            'max_alerts_per_day'        => (int)$this->getSetting('alert_max_per_day', '3'),
         ];
     }
 
     public function getAlertConfig(string $channel): array
     {
-        return $this->alerts[$channel] ?? [];
+        switch ($channel) {
+            case 'telegram':
+                return [
+                    'enabled'   => (bool)(int)$this->getSetting('telegram_enabled'),
+                    'bot_token' => $this->getSetting('telegram_bot_token'),
+                    'chat_ids'  => $this->parseCommaSeparated($this->getSetting('telegram_chat_ids')),
+                ];
+            case 'email':
+                return [
+                    'enabled'           => (bool)(int)$this->getSetting('email_enabled'),
+                    'method'            => 'smtp',
+                    'smtp_host'         => $this->getSetting('email_host'),
+                    'smtp_port'         => (int)$this->getSetting('email_port', '587'),
+                    'smtp_username'     => $this->getSetting('email_user'),
+                    'smtp_password'     => $this->getSetting('email_pass'),
+                    'from_address'      => $this->getSetting('email_from'),
+                    'from_name'         => 'Route Tracker',
+                    'recipients'        => $this->parseCommaSeparated($this->getSetting('email_to')),
+                ];
+            case 'viber':
+                return [
+                    'enabled'      => (bool)(int)$this->getSetting('viber_enabled'),
+                    'auth_token'   => $this->getSetting('viber_auth_token'),
+                    'receiver_ids' => $this->parseCommaSeparated($this->getSetting('viber_receiver_ids')),
+                ];
+            case 'signal':
+                return [
+                    'enabled'           => (bool)(int)$this->getSetting('signal_enabled'),
+                    'api_url'           => $this->getSetting('signal_api_url'),
+                    'sender_number'     => $this->getSetting('signal_sender'),
+                    'recipient_numbers' => $this->parseCommaSeparated($this->getSetting('signal_recipients')),
+                ];
+            default:
+                return [];
+        }
     }
 
     public function isAlertEnabled(string $channel): bool
     {
-        return (bool)($this->alerts[$channel]['enabled'] ?? false);
+        return (bool)(int)$this->getSetting($channel . '_enabled');
     }
 
     public function getRouteAlertChannels(array $route): array
     {
-        $routeChannels = $route['alerts'] ?? [];
+        $routeChannels = $route['alert_channels'] ?? [];
         return array_values(array_filter($routeChannels, fn($ch) => $this->isAlertEnabled($ch)));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Helpers
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private function parseCommaSeparated(string $value): array
+    {
+        return array_values(array_filter(array_map('trim', explode(',', $value))));
     }
 }

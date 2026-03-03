@@ -1,13 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Config — injected by dashboard.php from config.yaml
-// API_TOKEN and API_BASE are defined in a <script> block in dashboard.php
-// ═══════════════════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 let state = {
-  tab:     'overview',
+  tab:     'advisor',
   routeId: '',
   year:    '',
   month:   '',
@@ -28,7 +23,6 @@ async function api(params = {}) {
 
   let resp;
   try {
-    // credentials: 'same-origin' ensures the session cookie is sent with every request
     resp = await fetch(url, { credentials: 'same-origin' });
   } catch (e) {
     throw new Error(`Cannot reach api.php — is the web server running? (${e.message})`);
@@ -38,7 +32,6 @@ async function api(params = {}) {
 
   if (!resp.ok) {
     if (resp.status === 401) {
-      // Session expired — redirect to login page
       window.location.href = 'login.php';
       return;
     }
@@ -80,14 +73,12 @@ function filters() {
 // Init
 // ═══════════════════════════════════════════════════════════════════════════
 async function init() {
-  // Populate year select: current year and 3 previous years
   const selYear = document.getElementById('selYear');
   const cur = new Date().getFullYear();
   for (let y = cur; y >= cur - 3; y--) {
     selYear.add(new Option(y, y));
   }
 
-  // Tab clicks
   document.querySelectorAll('.tab').forEach(t => {
     t.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
@@ -97,7 +88,6 @@ async function init() {
     });
   });
 
-  // Filter controls
   document.getElementById('selYear').addEventListener('change', e => {
     state.year = e.target.value; clearCache(); render();
   });
@@ -105,7 +95,6 @@ async function init() {
     state.month = e.target.value; clearCache(); render();
   });
 
-  // Load routes for chips (failure is non-fatal)
   try {
     const d = await api({ action: 'route_list' });
     state.routes = d.routes || [];
@@ -125,7 +114,7 @@ function buildChips() {
   bar.innerHTML = '<div class="chip active" data-id="">All Routes</div>';
   state.routes.forEach(r => {
     const c = document.createElement('div');
-    c.className = 'chip';
+    c.className  = 'chip';
     c.dataset.id = r.id;
     c.textContent = r.label;
     bar.appendChild(c);
@@ -152,6 +141,7 @@ async function render() {
 
   try {
     switch (state.tab) {
+      case 'advisor':  await renderAdvisor(box);  break;
       case 'overview': await renderOverview(box); break;
       case 'best':     await renderBest(box);     break;
       case 'byday':    await renderByDay(box);    break;
@@ -191,12 +181,99 @@ function setStatus(s) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Format helpers
 // ═══════════════════════════════════════════════════════════════════════════
-const sec2min = s => (s / 60).toFixed(1) + ' min';
+const sec2min = s => s != null ? (s / 60).toFixed(1) + ' min' : '–';
 const dayName = d => ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'][+d] || d;
 
 function badgeMode(mode) {
   const cls = mode === 'arrive' ? 'badge-arrive' : 'badge-depart';
   return `<span class="mini-badge ${cls}">${mode}</span>`;
+}
+
+function gmapsLink(origin, destination) {
+  if (!origin || !destination) return '';
+  const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+  return `<a href="${url}" target="_blank" title="Navigate in Google Maps"
+             style="text-decoration:none;font-size:16px;opacity:.7;margin-left:6px;">🧭</a>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TAB: Advisor
+// ═══════════════════════════════════════════════════════════════════════════
+async function renderAdvisor(box) {
+  const d    = await api({ action: 'advisor_status' });
+  const rows = d.advisor || [];
+
+  const allRoutes = state.routes;
+
+  if (!rows.length) {
+    box.innerHTML = `
+      <div class="empty">
+        No advisor-enabled routes yet.<br>
+        Go to <a href="settings.php">⚙️ Settings → Routes</a> to configure a route with the advisor enabled.
+      </div>`;
+    return;
+  }
+
+  const allStages = ['planning', 'window', 'reminder', 'urgent', 'last_call'];
+
+  let html = '<div class="cards-grid">';
+
+  for (const r of rows) {
+    const liveMins = r.live_duration_seconds != null
+      ? Math.round(r.live_duration_seconds / 60)
+      : null;
+
+    const recDep = r.recommended_departure || '–';
+
+    let countdownHtml = '';
+    if (r.until_departure_min != null) {
+      const m = r.until_departure_min;
+      if (m > 0) {
+        countdownHtml = `<span class="advisor-countdown">in ${m} min</span>`;
+      } else if (m >= -5) {
+        countdownHtml = `<span class="advisor-countdown urgent">now!</span>`;
+      } else {
+        countdownHtml = `<span class="advisor-countdown muted">${Math.abs(m)} min ago</span>`;
+      }
+    }
+
+    const stagesHtml = allStages
+      .filter(s => (r.enabled_stages || []).includes(s))
+      .map(s => {
+        const fired = (r.stages_fired || []).includes(s);
+        return `<span class="advisor-stage ${fired ? 'fired' : 'pending'}" title="${s}">
+          ${fired ? '✓' : '•'} ${s.replace('_', ' ')}
+        </span>`;
+      }).join('');
+
+    const lastCheck = r.last_check
+      ? r.last_check.substring(11, 16)
+      : null;
+
+    html += `
+      <div class="card advisor-card">
+        <div class="card-header">
+          <span class="card-title">${r.route_label}</span>
+          <span class="card-badge badge-arrive">arrive ${r.arrive_time}</span>
+          ${gmapsLink(r.origin, r.destination)}
+        </div>
+        <div class="advisor-departure">
+          <span class="advisor-leave-label">Leave by</span>
+          <span class="advisor-leave-time">${recDep}</span>
+          ${countdownHtml}
+        </div>
+        ${liveMins !== null ? `
+        <div class="card-unit">Live: ${liveMins} min${r.last_check ? ` · checked ${lastCheck}` : ''}</div>` : `
+        <div class="card-unit muted-text">No live data yet today</div>`}
+        <div class="advisor-days">${r.days || ''}</div>
+        <div class="advisor-stages">${stagesHtml}</div>
+      </div>`;
+  }
+
+  html += '</div>';
+  html += '<div class="empty" style="font-size:12px;margin-top:8px;color:var(--muted)">Updated by advisor.php every 5 min via cron</div>';
+
+  box.innerHTML = html;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -223,25 +300,12 @@ async function renderOverview(box) {
       return `<div class="schedule-tag">${s.days} ${m} ${t}</div>`;
     }).join('');
 
-    const mapLink = r.latest_collection_id
-      ? `<a href="map.php?collection_id=${r.latest_collection_id}" target="_blank"
-            title="View latest collection on map"
-            style="text-decoration:none;font-size:16px;opacity:.7;margin-left:auto;">🗺️</a>`
-      : '';
-
-    const gmapsLink = (r.origin && r.destination)
-      ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(r.origin)}&destination=${encodeURIComponent(r.destination)}&travelmode=driving"
-            target="_blank" title="Navigate in Google Maps"
-            style="text-decoration:none;font-size:16px;opacity:.7;margin-left:6px;">🧭</a>`
-      : '';
-
     html += `
       <div class="card">
         <div class="card-header">
           <span class="card-title">${r.route_label || r.route_id}</span>
           ${badge}
-          ${mapLink}
-          ${gmapsLink}
+          ${gmapsLink(r.origin, r.destination)}
         </div>
         <div class="card-value">${sec2min(r.avg_duration)}</div>
         <div class="card-unit">average travel time · ${r.total_collections} samples</div>
@@ -354,7 +418,7 @@ async function renderByDay(box) {
 
   const colors   = ['#5b7cf6','#38bdf8','#34d399','#fbbf24','#f87171'];
   const datasets = routeIds.map((rid, i) => {
-    const label    = rows.find(r => r.route_id === rid)?.route_label || rid;
+    const label     = rows.find(r => r.route_id === rid)?.route_label || rid;
     const routeRows = rows.filter(r => r.route_id === rid);
     const data = dayNums.map(day => {
       const match = routeRows.filter(r => +r.scheduled_day === day);
@@ -394,7 +458,7 @@ async function renderTrends(box) {
   }
 
   if (byRoad.length) {
-    html += '<div class="section"><div class="section-title">Road Comparison (all alternatives)</div>';
+    html += '<div class="section"><div class="section-title">Road Comparison</div>';
     html += '<div class="table-wrap"><table>';
     html += '<thead><tr><th>Route</th><th>Road</th><th>Samples</th><th>Avg</th><th>Best</th><th>Worst</th><th>Dist (km)</th></tr></thead><tbody>';
     for (const r of byRoad) {
@@ -418,17 +482,16 @@ async function renderTrends(box) {
 
   box.innerHTML = html;
 
-  // Timeline line chart
+  // Timeline line chart — v3: all rows are primary (no route_index filter needed)
   if (timeline.length) {
-    const primary   = timeline.filter(r => +r.route_index === 0);
-    const routeIds  = [...new Set(primary.map(r => r.route_id))];
-    const allLabels = [...new Set(primary.map(r => r.collected_at.substring(0, 10)))].sort();
+    const routeIds  = [...new Set(timeline.map(r => r.route_id))];
+    const allLabels = [...new Set(timeline.map(r => r.collected_at.substring(0, 10)))].sort();
     const colors    = ['#5b7cf6','#38bdf8','#34d399','#fbbf24'];
 
     const datasets = routeIds.map((rid, i) => {
-      const label = primary.find(r => r.route_id === rid)?.route_label || rid;
+      const label = timeline.find(r => r.route_id === rid)?.route_label || rid;
       const data  = allLabels.map(date => {
-        const pts = primary.filter(r => r.route_id === rid && r.collected_at.startsWith(date));
+        const pts = timeline.filter(r => r.route_id === rid && r.collected_at.startsWith(date));
         if (!pts.length) return null;
         return +(pts.reduce((s, r) => s + +r.duration, 0) / pts.length / 60).toFixed(1);
       });
@@ -462,7 +525,7 @@ async function renderTrends(box) {
 // TAB: History
 // ═══════════════════════════════════════════════════════════════════════════
 async function renderHistory(box) {
-  const d = await api({ action: 'collections', limit: 100, ...filters() });
+  const d    = await api({ action: 'collections', limit: 100, ...filters() });
   const rows = d.collections || [];
 
   if (!rows.length) {
@@ -470,30 +533,26 @@ async function renderHistory(box) {
     return;
   }
 
-  let html = '<div class="section"><div class="section-title">Recent Collections (last 100)</div>';
+  let html = '<div class="section"><div class="section-title">Recent Trips (last 100)</div>';
   html += '<div class="table-wrap"><table>';
-  html += '<thead><tr><th>#</th><th>Route</th><th>Day</th><th>Scheduled</th><th>Collected At</th><th>Roads</th><th>Status</th></tr></thead><tbody>';
+  html += '<thead><tr><th>#</th><th>Route</th><th>Day</th><th>Scheduled</th><th>Collected At</th><th>Primary Route</th><th>Status</th></tr></thead><tbody>';
 
   for (const r of rows) {
     const statusColor = r.api_status === 'OK' ? 'var(--green)' : 'var(--red)';
-    const histGmapsLink = (r.origin && r.destination)
-      ? `<a href="https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(r.origin)}&destination=${encodeURIComponent(r.destination)}&travelmode=driving"
-            target="_blank" title="Navigate in Google Maps"
-            style="margin-left:6px;text-decoration:none;font-size:14px;vertical-align:middle;opacity:.7;">🧭</a>`
-      : '';
+    const routeSummary = r.primary_summary && r.traffic_duration_seconds
+      ? `${r.primary_summary} (${(r.traffic_duration_seconds / 60).toFixed(1)} min)`
+      : (r.routes_summary || '–');
+
     html += `<tr>
       <td style="color:var(--muted);font-size:11px">
         ${r.id}
-        <a href="map.php?collection_id=${r.id}" target="_blank"
-           title="View on map"
-           style="margin-left:6px;text-decoration:none;font-size:14px;vertical-align:middle;opacity:.7;">🗺️</a>
-        ${histGmapsLink}
+        ${gmapsLink(r.origin, r.destination)}
       </td>
       <td class="td-route">${r.route_label || r.route_id}</td>
       <td>${r.day_of_week || '–'}</td>
-      <td>${badgeMode(r.schedule_mode)} ${r.scheduled_time}</td>
-      <td style="font-size:12px;color:var(--muted)">${r.collected_at}</td>
-      <td style="font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.routes_summary || '–'}</td>
+      <td>${badgeMode(r.schedule_mode)} ${r.scheduled_time || ''}</td>
+      <td style="font-size:12px;color:var(--muted)">${r.collected_at || ''}</td>
+      <td style="font-size:12px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${routeSummary}</td>
       <td><span style="color:${statusColor};font-weight:600;font-size:12px">${r.api_status}</span></td>
     </tr>`;
   }
@@ -695,7 +754,6 @@ const SimpleChart = (() => {
 // ═══════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', init);
 
-// Resize: redraw current view (no cache clear, no re-fetch)
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);

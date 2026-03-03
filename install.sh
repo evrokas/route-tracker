@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # ═══════════════════════════════════════════════════════════════════
-# Route Tracker v2 — Installation Script
+# Route Tracker v3 — Installation Script
 # ═══════════════════════════════════════════════════════════════════
 #
 # Usage:
@@ -12,13 +12,11 @@
 #
 # What this script does:
 #   1. Checks system requirements (PHP, extensions, tools)
-#   2. Installs missing PHP extensions (yaml, sqlite3, curl)
+#   2. Installs missing PHP extensions (sqlite3, curl)
 #   3. Creates project directory structure
 #   4. Sets file permissions for web server
-#   5. Initializes the SQLite database
-#   6. Validates YAML configuration files
-#   7. Generates cron lines
-#   8. Optionally tests the Google Maps API connection
+#   5. Initializes the SQLite database (php schema.php --init)
+#   6. Generates cron lines
 # ═══════════════════════════════════════════════════════════════════
 
 set -e
@@ -82,7 +80,7 @@ if [[ $EUID -ne 0 && "$CHECK_ONLY" != true ]]; then
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-header "Route Tracker v2 — Installation"
+header "Route Tracker v3 — Installation"
 # ═══════════════════════════════════════════════════════════════════
 
 if [ "$CHECK_ONLY" = true ]; then
@@ -135,36 +133,11 @@ check_php_ext() {
 
 check_php_ext "curl"    "php-curl"
 check_php_ext "sqlite3" "php-sqlite3"
+check_php_ext "pdo_sqlite" "php-sqlite3"
 check_php_ext "json"    "php-json"
 
-# ─── YAML extension (PECL) ────────────────────────────────────────────────────
-YAML_MISSING=false
-if php -m 2>/dev/null | grep -qi "^yaml$"; then
-    success "PHP extension: yaml (PECL)"
-else
-    fail "PHP extension missing: yaml (PECL)"
-    YAML_MISSING=true
-    echo ""
-    echo "    The YAML extension requires manual installation:"
-    echo ""
-    echo "    # Step 1: Install build dependencies"
-    echo "    sudo apt install php-dev php-pear libyaml-dev"
-    echo ""
-    echo "    # Step 2: Install via PECL"
-    echo "    sudo pecl install yaml"
-    echo ""
-    echo "    # Step 3: Enable the extension"
-    if [ -n "$PHP_VERSION" ]; then
-        echo "    echo 'extension=yaml.so' | sudo tee /etc/php/${PHP_VERSION}/mods-available/yaml.ini"
-        echo "    sudo phpenmod yaml"
-    else
-        echo "    echo 'extension=yaml.so' >> /etc/php/PHP_VERSION/cli/php.ini"
-    fi
-    echo ""
-    echo "    # Step 4: Verify"
-    echo "    php -m | grep yaml"
-    echo ""
-fi
+# Note: php-yaml (PECL) is NOT required in v3 — all config is stored in SQLite
+info "Note: php-yaml (PECL) is not required in v3 (config stored in SQLite)"
 
 # ─── curl command ─────────────────────────────────────────────────────────────
 if command -v curl &> /dev/null; then
@@ -250,47 +223,7 @@ if [ -n "$PACKAGES_TO_INSTALL" ]; then
     apt-get install -y -qq $PACKAGES_TO_INSTALL
     success "Installed PHP extensions via apt"
 else
-    info "All apt-installable extensions already present"
-fi
-
-# Try to install yaml via PECL if missing
-if [ "$YAML_MISSING" = true ]; then
-    echo ""
-    read -p "Attempt to install php-yaml via PECL? (Y/n) " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        info "Installing PECL yaml dependencies..."
-        apt-get install -y -qq php-dev php-pear libyaml-dev 2>/dev/null || true
-
-        info "Installing yaml extension via PECL..."
-        if pecl install yaml 2>/dev/null; then
-            if [ -n "$PHP_VERSION" ] && [ -d "/etc/php/${PHP_VERSION}/mods-available" ]; then
-                echo "extension=yaml.so" > "/etc/php/${PHP_VERSION}/mods-available/yaml.ini"
-                phpenmod yaml 2>/dev/null || true
-                success "yaml extension installed and enabled"
-            else
-                PHP_INI=$(php -i 2>/dev/null | grep "Loaded Configuration File" | awk '{print $NF}')
-                if [ -n "$PHP_INI" ] && [ -f "$PHP_INI" ]; then
-                    if ! grep -q "extension=yaml.so" "$PHP_INI"; then
-                        echo "extension=yaml.so" >> "$PHP_INI"
-                    fi
-                    success "yaml extension installed (added to ${PHP_INI})"
-                else
-                    warn "yaml installed but could not auto-enable. Add 'extension=yaml.so' to php.ini"
-                fi
-            fi
-
-            if php -m 2>/dev/null | grep -qi "^yaml$"; then
-                success "yaml extension verified working"
-            else
-                warn "yaml extension installed but not loading. Restart PHP-FPM/Apache."
-            fi
-        else
-            fail "PECL yaml installation failed. Install manually (see instructions above)."
-        fi
-    else
-        warn "Skipping yaml installation. You'll need to install it manually."
-    fi
+    info "All required extensions already present"
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -320,14 +253,19 @@ header "Step 5: Copying Project Files"
 PHP_FILES=(
     "Config.php"
     "AlertManager.php"
+    "DepartureAdvisor.php"
     "auth.php"
     "schema.php"
     "collector.php"
+    "advisor.php"
     "api.php"
     "login.php"
     "dashboard.php"
     "dashboard.css"
     "dashboard.js"
+    "settings.php"
+    "settings.js"
+    "settings.css"
     "README.md"
 )
 
@@ -335,21 +273,6 @@ for file in "${PHP_FILES[@]}"; do
     src="${SCRIPT_DIR}/${file}"
     dst="${INSTALL_DIR}/${file}"
     if [ -f "$src" ]; then
-        cp "$src" "$dst"
-        success "Copied: ${file}"
-    else
-        warn "Source not found: ${file} (will need to be created)"
-    fi
-done
-
-# Copy YAML configs — don't overwrite if they already exist (user may have customized)
-YAML_FILES=("config.yaml" "routes.yaml" "alerts.yaml")
-for file in "${YAML_FILES[@]}"; do
-    src="${SCRIPT_DIR}/${file}"
-    dst="${INSTALL_DIR}/${file}"
-    if [ -f "$dst" ]; then
-        info "Preserved existing: ${file} (not overwritten)"
-    elif [ -f "$src" ]; then
         cp "$src" "$dst"
         success "Copied: ${file}"
     else
@@ -377,91 +300,41 @@ find "${INSTALL_DIR}" -maxdepth 1 -name "*.css"  -exec chmod 644 {} \;
 find "${INSTALL_DIR}" -maxdepth 1 -name "*.js"   -exec chmod 644 {} \;
 find "${INSTALL_DIR}" -maxdepth 1 -name "*.md"   -exec chmod 644 {} \;
 
-# YAML configs: restricted (contain API keys + credentials)
-find "${INSTALL_DIR}" -maxdepth 1 -name "*.yaml" -exec chmod 640 {} \;
-
 # Executables
-[ -f "${INSTALL_DIR}/install.sh"   ] && chmod 755 "${INSTALL_DIR}/install.sh"
-[ -f "${INSTALL_DIR}/collector.php"] && chmod 755 "${INSTALL_DIR}/collector.php"
-[ -f "${INSTALL_DIR}/schema.php"   ] && chmod 755 "${INSTALL_DIR}/schema.php"
+[ -f "${INSTALL_DIR}/install.sh"        ] && chmod 755 "${INSTALL_DIR}/install.sh"
+[ -f "${INSTALL_DIR}/collector.php"     ] && chmod 755 "${INSTALL_DIR}/collector.php"
+[ -f "${INSTALL_DIR}/advisor.php"       ] && chmod 755 "${INSTALL_DIR}/advisor.php"
+[ -f "${INSTALL_DIR}/schema.php"        ] && chmod 755 "${INSTALL_DIR}/schema.php"
 
 success "Permissions set (owner: ${WEB_USER}:${WEB_GROUP})"
-info "YAML files restricted to 640 (contain API keys)"
 
 # ═══════════════════════════════════════════════════════════════════
-header "Step 7: Validating Configuration"
-# ═══════════════════════════════════════════════════════════════════
-
-if php -m 2>/dev/null | grep -qi "^yaml$"; then
-    for file in "${YAML_FILES[@]}"; do
-        filepath="${INSTALL_DIR}/${file}"
-        if [ -f "$filepath" ]; then
-            result=$(php -r "
-\$data = yaml_parse_file('${filepath}');
-if (\$data === false) { echo 'PARSE_ERROR'; }
-else { echo 'OK:' . count(\$data) . ' keys'; }
-" 2>&1)
-
-            if [[ "$result" == OK* ]]; then
-                success "YAML valid: ${file} (${result})"
-            else
-                fail "YAML parse error: ${file}"
-                echo "    ${result}"
-            fi
-        fi
-    done
-else
-    warn "Cannot validate YAML files (yaml extension not loaded)"
-fi
-
-# Check API key
-if [ -f "${INSTALL_DIR}/config.yaml" ] && php -m 2>/dev/null | grep -qi "^yaml$"; then
-    API_KEY=$(php -r "
-\$c = yaml_parse_file('${INSTALL_DIR}/config.yaml');
-echo \$c['google_maps']['api_key'] ?? '';
-" 2>/dev/null)
-
-    if [ -z "$API_KEY" ] || [ "$API_KEY" = "YOUR_GOOGLE_MAPS_API_KEY_HERE" ]; then
-        warn "Google Maps API key not configured yet"
-        echo "    Edit: ${INSTALL_DIR}/config.yaml"
-        echo "    Set:  google_maps.api_key"
-    else
-        success "Google Maps API key is set"
-    fi
-fi
-
-# ═══════════════════════════════════════════════════════════════════
-header "Step 8: Initializing Database"
+header "Step 7: Initializing Database"
 # ═══════════════════════════════════════════════════════════════════
 
 if [ -f "${INSTALL_DIR}/schema.php" ]; then
     cd "${INSTALL_DIR}"
-    php schema.php 2>&1 | while IFS= read -r line; do
+    php schema.php --init 2>&1 | while IFS= read -r line; do
         echo "    ${line}"
     done
-    success "Database initialized"
+    success "Database initialized (open Settings to configure API key + routes)"
 else
-    warn "schema.php not found — run 'php schema.php' manually after copying files"
+    warn "schema.php not found — run 'php schema.php --init' manually after copying files"
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-header "Step 9: Generate Cron Schedule"
+header "Step 8: Cron Setup"
 # ═══════════════════════════════════════════════════════════════════
 
-if [ -f "${INSTALL_DIR}/collector.php" ]; then
-    echo ""
-    cd "${INSTALL_DIR}"
-    php collector.php --schedule 2>&1 | while IFS= read -r line; do
-        echo "    ${line}"
-    done
-    echo ""
-    info "Add the cron lines above with: crontab -e"
-else
-    warn "collector.php not found"
-fi
+echo ""
+echo "  Add the following cron job (runs advisor + collection every 5 minutes):"
+echo ""
+echo "    */5 * * * * php ${INSTALL_DIR}/advisor.php >> ${INSTALL_DIR}/data/advisor.log 2>&1"
+echo ""
+info "Add with: crontab -e"
 
 # ═══════════════════════════════════════════════════════════════════
-header "Step 10: Web Server Configuration"
+header "Step 9: Web Server Configuration"
 # ═══════════════════════════════════════════════════════════════════
 
 echo ""
@@ -488,7 +361,7 @@ cat << APACHE
             Require all denied
         </Directory>
 
-        <FilesMatch "\.(yaml|log|sqlite)$">
+        <FilesMatch "\.(log|sqlite)$">
             Require all denied
         </FilesMatch>
     </VirtualHost>
@@ -509,8 +382,8 @@ cat << NGINX
         }
 
         location /data/      { deny all; }
-        location ~ \.yaml$   { deny all; }
         location ~ \.sqlite$ { deny all; }
+        location ~ \.log$    { deny all; }
     }
 NGINX
 echo ""
@@ -526,29 +399,24 @@ echo "  Project directory: ${INSTALL_DIR}"
 echo ""
 echo -e "  ${BOLD}Next steps:${NC}"
 echo ""
-echo "  1. Edit configuration files:"
-echo "     ${CYAN}nano ${INSTALL_DIR}/config.yaml${NC}     ← Add Google Maps API key + set api_token"
-echo "     ${CYAN}nano ${INSTALL_DIR}/routes.yaml${NC}     ← Add work/school addresses"
-echo "     ${CYAN}nano ${INSTALL_DIR}/alerts.yaml${NC}     ← Configure alert channels"
+echo "  1. Open the Settings UI in your browser:"
+echo "     http://your-server/settings.php"
+echo "     Default login password: changeme"
 echo ""
-echo "  2. Update dashboard token:"
-echo "     ${CYAN}nano ${INSTALL_DIR}/dashboard.php${NC}  ← Only needed if PHP config loading fails"
+echo "  2. In Settings → General:"
+echo "     - Add your Google Maps API key"
+echo "     - Set timezone"
 echo ""
-echo "  3. Test API connection:"
-echo "     ${CYAN}cd ${INSTALL_DIR} && php collector.php --test${NC}"
+echo "  3. In Settings → Routes:"
+echo "     - Add routes with schedules"
+echo "     - Enable the Departure Advisor if desired"
 echo ""
-echo "  4. Test alerts:"
-echo "     ${CYAN}php collector.php --test-alerts${NC}"
+echo "  4. In Settings → Alerts:"
+echo "     - Configure Telegram / Email / Viber / Signal"
 echo ""
-echo "  5. Set up cron (see schedule above):"
-echo "     ${CYAN}crontab -e${NC}"
+echo "  5. Set up cron (see Step 8 above):"
+echo "     crontab -e"
 echo ""
-echo "  6. Start web server and open dashboard"
+echo "  6. Test from Settings → System tab:"
+echo "     Run Test Collection, Run Advisor Now"
 echo ""
-
-if [ "$YAML_MISSING" = true ] && ! php -m 2>/dev/null | grep -qi "^yaml$"; then
-    echo -e "  ${RED}${BOLD}⚠ IMPORTANT: php-yaml extension still not loaded.${NC}"
-    echo "  The system will NOT work without it. See Step 3 output above."
-    echo "  You may need to restart PHP-FPM or Apache after installing."
-    echo ""
-fi

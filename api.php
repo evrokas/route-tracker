@@ -1,35 +1,48 @@
 <?php
 
 /**
- * api.php — Route Tracker v2
- * JSON REST API for the dashboard.
+ * api.php — Route Tracker v3
+ * JSON REST API for the dashboard and settings UI.
  *
- * Requires an active session (login via login.php / dashboard.php).
+ * All actions require an active session.
  *
- * Note: route_list queries the DB for routes that have actual data.
- *
- * Global filters:
- *   &route_id=son_learning
- *   &year=2025
- *   &month=9
- *   &day=4        (ISO 1=Mon..7=Sun)
- *
- * Actions:
+ * GET actions:
  *   ?action=route_list
  *   ?action=overview
  *   ?action=by_day
  *   ?action=by_month
  *   ?action=by_route_name
  *   ?action=by_week
- *   ?action=timeline
+ *   ?action=timeline        &limit=200
  *   ?action=best_routes
- *   ?action=collections&limit=50
+ *   ?action=collections     &limit=100
+ *   ?action=advisor_status
+ *   ?action=get_settings
+ *   ?action=test_collection &route_id=xxx
+ *   ?action=run_advisor
+ *   ?action=get_logs        &type=collector|alerts|advisor
+ *   ?action=db_stats
+ *   ?action=export_trips
+ *
+ * POST actions (JSON body or form data):
+ *   ?action=save_setting     { key, value }  or  { settings: {key:value,...} }
+ *   ?action=save_route       { id, label, origin, ... }
+ *   ?action=delete_route     { id }
+ *   ?action=test_alert       { channel }
+ *   ?action=change_password  { current, new_password, confirm }
+ *
+ * Global GET filters (for data queries):
+ *   &route_id=xxx
+ *   &year=2025
+ *   &month=9
+ *   &day=4   (ISO 1=Mon..7=Sun)
  */
 
 $baseDir = __DIR__;
 require_once $baseDir . '/Config.php';
+require_once $baseDir . '/auth.php';
 
-// ─── CORS / JSON output headers ───────────────────────────────────────────────
+// ─── Headers ──────────────────────────────────────────────────────────────────
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, no-store');
@@ -55,35 +68,33 @@ try {
     jsonError('Server configuration error: ' . $e->getMessage(), 500);
 }
 
-// ─── Auth — session-based (no token in URL or HTML) ──────────────────────────
-
 require_once $baseDir . '/auth.php';
 Auth::requireLoginOrJson();
 
-// ─── Open DB ─────────────────────────────────────────────────────────────────
+$pdo    = $config->getPdo();
+$action = $_GET['action'] ?? 'overview';
 
-try {
-    $pdo = new PDO('sqlite:' . $config->getDbPath());
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->exec('PRAGMA journal_mode=WAL;');
-} catch (Exception $e) {
-    jsonError('Database error: ' . $e->getMessage(), 500);
-}
+// ─── Input helpers ────────────────────────────────────────────────────────────
 
-// ─── Read inputs ─────────────────────────────────────────────────────────────
-
-$action  = $_GET['action']   ?? 'overview';
 $routeId = isset($_GET['route_id']) ? trim($_GET['route_id']) : null;
 $year    = isset($_GET['year'])  ? (int)$_GET['year']  : null;
 $month   = isset($_GET['month']) ? (int)$_GET['month'] : null;
 $day     = isset($_GET['day'])   ? (int)$_GET['day']   : null;
 $limit   = isset($_GET['limit']) ? min((int)$_GET['limit'], 500) : 100;
 
-// ─── Route: route_list ── runs after DB open so it can return real data ──────
+function getPostData(): array
+{
+    $raw = file_get_contents('php://input');
+    if ($raw) {
+        $json = json_decode($raw, true);
+        if (is_array($json)) return $json;
+    }
+    return $_POST ?: [];
+}
 
-// ─── Helper: build WHERE clause ───────────────────────────────────────────────
+// ─── WHERE clause builder ─────────────────────────────────────────────────────
 
-function buildWhere(array &$params, ?string $routeId, ?int $year, ?int $month, ?int $day, string $prefix = 'c'): string
+function buildWhere(array &$params, ?string $routeId, ?int $year, ?int $month, ?int $day, string $prefix = 't'): string
 {
     $where = ['1=1'];
     if ($routeId) {
@@ -106,88 +117,110 @@ function buildWhere(array &$params, ?string $routeId, ?int $year, ?int $month, ?
     return implode(' AND ', $where);
 }
 
-// ─── Route: route_list — queries DB for routes with actual data ──────────────
-
-if ($action === 'route_list') {
-    // Get distinct route IDs + labels from the database (only routes with real data)
-    try {
-        $rows = $pdo->query("
-            SELECT DISTINCT route_id, route_label
-            FROM collections
-            WHERE api_status = 'OK'
-            ORDER BY route_id
-        ")->fetchAll(PDO::FETCH_ASSOC);
-    } catch (Exception $e) {
-        jsonError('Database query failed: ' . $e->getMessage(), 500);
-    }
-
-    // Merge with YAML for label overrides (YAML label takes priority, DB is fallback)
-    $yamlRoutes = $config->getAllRoutes();
-    $yamlLabels = [];
-    foreach ($yamlRoutes as $r) {
-        $yamlLabels[$r['id']] = $r['label'];
-    }
-
-    $routes = [];
-    foreach ($rows as $row) {
-        $routes[] = [
-            'id'    => $row['route_id'],
-            'label' => $yamlLabels[$row['route_id']] ?? $row['route_label'] ?? $row['route_id'],
-        ];
-    }
-
-    // If DB has no data yet (fresh install), fall back to YAML routes
-    if (empty($routes)) {
-        foreach ($yamlRoutes as $r) {
-            $routes[] = ['id' => $r['id'], 'label' => $r['label']];
+function formatRows(array $rows): array
+{
+    foreach ($rows as &$row) {
+        foreach (['avg_duration','min_duration','max_duration'] as $f) {
+            if (isset($row[$f])) $row[$f] = (float)round($row[$f]);
+        }
+        if (isset($row['avg_distance_meters'])) {
+            $row['avg_distance_meters'] = (int)round($row['avg_distance_meters']);
         }
     }
-
-    jsonOut(['routes' => $routes, 'generated_at' => date('c')]);
+    return $rows;
 }
 
-// ─── Route: overview ──────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// READ actions
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ─── route_list ───────────────────────────────────────────────────────────────
+
+if ($action === 'route_list') {
+    // ?all=1 → include inactive routes (used by settings page)
+    $all = !empty($_GET['all']);
+    if ($all) {
+        $routes = $config->getAllRoutes();
+    } else {
+        $routes = $config->getAllActiveRoutes();
+    }
+
+    // Return full route data so settings UI can populate edit forms
+    $result = array_map(function($r) {
+        return [
+            'id'                   => $r['id'],
+            'label'                => $r['label'],
+            'origin'               => $r['origin'] ?? '',
+            'destination'          => $r['destination'] ?? '',
+            'travel_mode'          => $r['travel_mode'] ?? 'driving',
+            'schedule'             => $r['schedule'] ?? [],
+            'advisor_enabled'      => (bool)(int)($r['advisor_enabled'] ?? 0),
+            'advisor_start_before' => (int)($r['advisor_start_before'] ?? 90),
+            'advisor_buffer_mode'  => $r['advisor_buffer_mode'] ?? 'auto',
+            'advisor_fixed_buffer' => (int)($r['advisor_fixed_buffer'] ?? 10),
+            'advisor_stages'       => $r['advisor_stages'] ?? ['planning','window','reminder','urgent','last_call'],
+            'alert_channels'       => $r['alert_channels'] ?? [],
+            'active'               => (bool)(int)($r['active'] ?? 1),
+        ];
+    }, $routes);
+
+    // Fall back to route IDs with trip data if no routes configured yet
+    if (empty($result)) {
+        try {
+            $rows = $pdo->query("SELECT DISTINCT route_id FROM trips WHERE api_status='OK' ORDER BY route_id")
+                        ->fetchAll(PDO::FETCH_COLUMN);
+            $result = array_map(fn($id) => [
+                'id' => $id, 'label' => $id, 'origin' => '', 'destination' => '',
+                'travel_mode' => 'driving', 'schedule' => [], 'advisor_enabled' => false,
+                'advisor_start_before' => 90, 'advisor_buffer_mode' => 'auto',
+                'advisor_fixed_buffer' => 10,
+                'advisor_stages' => ['planning','window','reminder','urgent','last_call'],
+                'alert_channels' => [], 'active' => true,
+            ], $rows);
+        } catch (Exception $e) {}
+    }
+
+    jsonOut(['routes' => $result, 'generated_at' => date('c')]);
+}
+
+// ─── overview ─────────────────────────────────────────────────────────────────
 
 if ($action === 'overview') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.route_id, c.route_label,
-            c.origin, c.destination,
-            COUNT(DISTINCT c.id)                                              AS total_collections,
-            AVG(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS avg_duration,
-            MIN(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS min_duration,
-            MAX(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS max_duration,
-            c.scheduled_time, c.schedule_mode,
-            MIN(c.collected_at) AS first_seen,
-            MAX(c.collected_at) AS last_seen,
-            (
-                SELECT c2.id FROM collections c2
-                WHERE c2.route_id = c.route_id AND c2.api_status = 'OK'
-                ORDER BY c2.collected_at DESC
-                LIMIT 1
-            ) AS latest_collection_id,
-            (
-                SELECT c2.collected_at FROM collections c2
-                WHERE c2.route_id = c.route_id AND c2.api_status = 'OK'
-                ORDER BY c2.collected_at DESC
-                LIMIT 1
-            ) AS latest_collected_at
-        FROM collections c
-        JOIN routes r ON r.collection_id = c.id AND r.route_index = 0
+            t.route_id,
+            r.label  AS route_label,
+            r.origin,
+            r.destination,
+            COUNT(*)                             AS total_collections,
+            AVG(t.traffic_duration_seconds)      AS avg_duration,
+            MIN(t.traffic_duration_seconds)      AS min_duration,
+            MAX(t.traffic_duration_seconds)      AS max_duration,
+            t.scheduled_time,
+            t.schedule_mode,
+            MIN(t.collected_at)                  AS first_seen,
+            MAX(t.collected_at)                  AS last_seen,
+            (SELECT t2.id FROM trips t2
+             WHERE t2.route_id = t.route_id AND t2.api_status = 'OK'
+             ORDER BY t2.collected_at DESC LIMIT 1)           AS latest_collection_id,
+            (SELECT t2.collected_at FROM trips t2
+             WHERE t2.route_id = t.route_id AND t2.api_status = 'OK'
+             ORDER BY t2.collected_at DESC LIMIT 1)           AS latest_collected_at
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-        GROUP BY c.route_id, c.scheduled_time, c.schedule_mode
-        ORDER BY c.route_id, c.scheduled_time
+        GROUP BY t.route_id, t.scheduled_time, t.schedule_mode
+        ORDER BY t.route_id, t.scheduled_time
     ");
-    $rows->execute($params);
-    $data = $rows->fetchAll(PDO::FETCH_ASSOC);
+    $st->execute($params);
+    $data = $st->fetchAll(PDO::FETCH_ASSOC);
 
-    // Add schedule info from YAML
     foreach ($data as &$row) {
-        $yamlRoute = $config->getRoute($row['route_id']);
-        $row['schedule'] = $yamlRoute['schedule'] ?? [];
+        $dbRoute          = $config->getRoute($row['route_id']);
+        $row['schedule']  = $dbRoute['schedule'] ?? [];
         $row['avg_duration'] = (float)round($row['avg_duration']);
         $row['min_duration'] = (int)$row['min_duration'];
         $row['max_duration'] = (int)$row['max_duration'];
@@ -197,171 +230,185 @@ if ($action === 'overview') {
     jsonOut(['overview' => $data, 'generated_at' => date('c')]);
 }
 
-// ─── Route: by_day ────────────────────────────────────────────────────────────
+// ─── by_day ───────────────────────────────────────────────────────────────────
 
 if ($action === 'by_day') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.route_id, c.route_label, c.scheduled_day, c.day_of_week,
-            c.scheduled_time, c.schedule_mode,
-            r.summary AS route_name,
-            COUNT(*)  AS sample_count,
-            AVG(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS avg_duration,
-            MIN(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS min_duration,
-            MAX(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS max_duration,
-            AVG(r.distance_meters) AS avg_distance
-        FROM collections c
-        JOIN routes r ON r.collection_id = c.id
+            t.route_id,
+            r.label       AS route_label,
+            t.scheduled_day,
+            t.day_of_week,
+            t.scheduled_time,
+            t.schedule_mode,
+            t.primary_summary AS route_name,
+            COUNT(*)      AS sample_count,
+            AVG(t.traffic_duration_seconds) AS avg_duration,
+            MIN(t.traffic_duration_seconds) AS min_duration,
+            MAX(t.traffic_duration_seconds) AS max_duration,
+            AVG(t.distance_meters)          AS avg_distance
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-        GROUP BY c.route_id, c.scheduled_day, r.summary
-        ORDER BY c.route_id, c.scheduled_day, avg_duration ASC
+          AND t.primary_summary IS NOT NULL
+        GROUP BY t.route_id, t.scheduled_day, t.primary_summary
+        ORDER BY t.route_id, t.scheduled_day, avg_duration ASC
     ");
-    $rows->execute($params);
-    $data = formatRows($rows->fetchAll(PDO::FETCH_ASSOC));
-
-    jsonOut(['by_day' => $data, 'generated_at' => date('c')]);
+    $st->execute($params);
+    jsonOut(['by_day' => formatRows($st->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
 }
 
-// ─── Route: by_month ──────────────────────────────────────────────────────────
+// ─── by_month ─────────────────────────────────────────────────────────────────
 
 if ($action === 'by_month') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.route_id, c.route_label, c.year, c.month,
-            COUNT(DISTINCT c.id) AS sample_count,
-            AVG(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS avg_duration,
-            MIN(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS min_duration,
-            MAX(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS max_duration
-        FROM collections c
-        JOIN routes r ON r.collection_id = c.id AND r.route_index = 0
+            t.route_id,
+            r.label AS route_label,
+            t.year, t.month,
+            COUNT(*) AS sample_count,
+            AVG(t.traffic_duration_seconds) AS avg_duration,
+            MIN(t.traffic_duration_seconds) AS min_duration,
+            MAX(t.traffic_duration_seconds) AS max_duration
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-        GROUP BY c.route_id, c.year, c.month
-        ORDER BY c.route_id, c.year, c.month
+        GROUP BY t.route_id, t.year, t.month
+        ORDER BY t.route_id, t.year, t.month
     ");
-    $rows->execute($params);
-    jsonOut(['by_month' => formatRows($rows->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
+    $st->execute($params);
+    jsonOut(['by_month' => formatRows($st->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
 }
 
-// ─── Route: by_route_name ─────────────────────────────────────────────────────
+// ─── by_route_name ────────────────────────────────────────────────────────────
 
 if ($action === 'by_route_name') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.route_id, c.route_label,
-            r.summary AS route_name,
-            COUNT(*)  AS sample_count,
-            AVG(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS avg_duration,
-            MIN(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS min_duration,
-            MAX(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS max_duration,
-            AVG(r.distance_meters) AS avg_distance_meters
-        FROM collections c
-        JOIN routes r ON r.collection_id = c.id
+            t.route_id,
+            r.label        AS route_label,
+            t.primary_summary AS route_name,
+            COUNT(*)       AS sample_count,
+            AVG(t.traffic_duration_seconds) AS avg_duration,
+            MIN(t.traffic_duration_seconds) AS min_duration,
+            MAX(t.traffic_duration_seconds) AS max_duration,
+            AVG(t.distance_meters)          AS avg_distance_meters
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-          AND r.summary IS NOT NULL AND r.summary != ''
-        GROUP BY c.route_id, r.summary
-        ORDER BY c.route_id, avg_duration ASC
+          AND t.primary_summary IS NOT NULL AND t.primary_summary != ''
+        GROUP BY t.route_id, t.primary_summary
+        ORDER BY t.route_id, avg_duration ASC
     ");
-    $rows->execute($params);
-    jsonOut(['by_route_name' => formatRows($rows->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
+    $st->execute($params);
+    jsonOut(['by_route_name' => formatRows($st->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
 }
 
-// ─── Route: by_week ───────────────────────────────────────────────────────────
+// ─── by_week ──────────────────────────────────────────────────────────────────
 
 if ($action === 'by_week') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.route_id, c.route_label, c.year, c.week_number,
-            COUNT(DISTINCT c.id) AS sample_count,
-            AVG(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS avg_duration,
-            MIN(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS min_duration,
-            MAX(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS max_duration
-        FROM collections c
-        JOIN routes r ON r.collection_id = c.id AND r.route_index = 0
+            t.route_id,
+            r.label AS route_label,
+            t.year, t.week_number,
+            COUNT(*) AS sample_count,
+            AVG(t.traffic_duration_seconds) AS avg_duration,
+            MIN(t.traffic_duration_seconds) AS min_duration,
+            MAX(t.traffic_duration_seconds) AS max_duration
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-        GROUP BY c.route_id, c.year, c.week_number
-        ORDER BY c.route_id, c.year, c.week_number
+        GROUP BY t.route_id, t.year, t.week_number
+        ORDER BY t.route_id, t.year, t.week_number
     ");
-    $rows->execute($params);
-    jsonOut(['by_week' => formatRows($rows->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
+    $st->execute($params);
+    jsonOut(['by_week' => formatRows($st->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
 }
 
-// ─── Route: timeline ─────────────────────────────────────────────────────────
+// ─── timeline ─────────────────────────────────────────────────────────────────
 
 if ($action === 'timeline') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.route_id, c.route_label, c.collected_at, c.day_of_week,
-            c.scheduled_time, c.schedule_mode,
-            r.summary AS route_name,
-            r.route_index,
-            COALESCE(r.duration_in_traffic_seconds, r.duration_seconds) AS duration,
-            r.distance_meters
-        FROM collections c
-        JOIN routes r ON r.collection_id = c.id
+            t.route_id,
+            r.label  AS route_label,
+            t.collected_at,
+            t.day_of_week,
+            t.scheduled_time,
+            t.schedule_mode,
+            t.primary_summary  AS route_name,
+            0                  AS route_index,
+            t.traffic_duration_seconds AS duration,
+            t.distance_meters
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-        ORDER BY c.collected_at ASC, r.route_index ASC
+        ORDER BY t.collected_at ASC
         LIMIT :lim
     ");
     $params[':lim'] = $limit;
-    $rows->execute($params);
-    jsonOut(['timeline' => formatRows($rows->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
+    $st->execute($params);
+    jsonOut(['timeline' => formatRows($st->fetchAll(PDO::FETCH_ASSOC)), 'generated_at' => date('c')]);
 }
 
-// ─── Route: best_routes ───────────────────────────────────────────────────────
+// ─── best_routes ──────────────────────────────────────────────────────────────
 
 if ($action === 'best_routes') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    // Best route per route_id + scheduled_day combination
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.route_id, c.route_label, c.scheduled_day, c.day_of_week,
-            c.scheduled_time, c.schedule_mode,
-            r.summary AS route_name,
+            t.route_id,
+            r.label   AS route_label,
+            t.scheduled_day,
+            t.day_of_week,
+            t.scheduled_time,
+            t.schedule_mode,
+            t.primary_summary AS route_name,
             COUNT(*)  AS sample_count,
-            AVG(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS avg_duration,
-            MIN(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS min_duration,
-            MAX(COALESCE(r.duration_in_traffic_seconds, r.duration_seconds)) AS max_duration
-        FROM collections c
-        JOIN routes r ON r.collection_id = c.id
+            AVG(t.traffic_duration_seconds) AS avg_duration,
+            MIN(t.traffic_duration_seconds) AS min_duration,
+            MAX(t.traffic_duration_seconds) AS max_duration
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-          AND r.summary IS NOT NULL AND r.summary != ''
-        GROUP BY c.route_id, c.scheduled_day, r.summary
-        ORDER BY c.route_id, c.scheduled_day, avg_duration ASC
+          AND t.primary_summary IS NOT NULL AND t.primary_summary != ''
+        GROUP BY t.route_id, t.scheduled_day, t.primary_summary
+        ORDER BY t.route_id, t.scheduled_day, avg_duration ASC
     ");
-    $rows->execute($params);
-    $all = formatRows($rows->fetchAll(PDO::FETCH_ASSOC));
+    $st->execute($params);
+    $all = formatRows($st->fetchAll(PDO::FETCH_ASSOC));
 
-    // Group: best route per route_id + day, alternatives as sub-array
     $grouped = [];
     foreach ($all as $row) {
         $key = $row['route_id'] . '|' . $row['scheduled_day'];
         if (!isset($grouped[$key])) {
             $grouped[$key] = [
-                'route_id'      => $row['route_id'],
-                'route_label'   => $row['route_label'],
-                'scheduled_day' => $row['scheduled_day'],
-                'day_of_week'   => $row['day_of_week'],
-                'scheduled_time'=> $row['scheduled_time'],
-                'schedule_mode' => $row['schedule_mode'],
-                'best_route'    => $row,
-                'alternatives'  => [],
+                'route_id'       => $row['route_id'],
+                'route_label'    => $row['route_label'],
+                'scheduled_day'  => $row['scheduled_day'],
+                'day_of_week'    => $row['day_of_week'],
+                'scheduled_time' => $row['scheduled_time'],
+                'schedule_mode'  => $row['schedule_mode'],
+                'best_route'     => $row,
+                'alternatives'   => [],
             ];
         } else {
             $grouped[$key]['alternatives'][] = $row;
@@ -371,158 +418,398 @@ if ($action === 'best_routes') {
     jsonOut(['best_routes' => array_values($grouped), 'generated_at' => date('c')]);
 }
 
-// ─── Route: collections ───────────────────────────────────────────────────────
+// ─── collections (trips list for History tab) ─────────────────────────────────
 
 if ($action === 'collections') {
     $params = [];
     $where  = buildWhere($params, $routeId, $year, $month, $day);
 
-    $rows = $pdo->prepare("
+    $st = $pdo->prepare("
         SELECT
-            c.id, c.route_id, c.route_label, c.collected_at,
-            c.scheduled_day, c.day_of_week, c.scheduled_time, c.schedule_mode,
-            c.api_status, c.origin, c.destination,
-            GROUP_CONCAT(r.summary || ' (' || ROUND(COALESCE(r.duration_in_traffic_seconds,r.duration_seconds)/60.0,1) || ' min)', ' | ') AS routes_summary
-        FROM collections c
-        LEFT JOIN routes r ON r.collection_id = c.id
+            t.id,
+            t.route_id,
+            r.label    AS route_label,
+            r.origin,
+            r.destination,
+            t.collected_at,
+            t.scheduled_day,
+            t.day_of_week,
+            t.scheduled_time,
+            t.schedule_mode,
+            t.api_status,
+            t.primary_summary,
+            t.traffic_duration_seconds,
+            t.best_alt_summary,
+            t.best_alt_seconds,
+            CASE WHEN t.primary_summary IS NOT NULL
+                 THEN t.primary_summary || ' (' || ROUND(t.traffic_duration_seconds/60.0,1) || ' min)'
+                 ELSE NULL
+            END AS routes_summary
+        FROM trips t
+        LEFT JOIN routes r ON r.id = t.route_id
         WHERE {$where}
-        GROUP BY c.id
-        ORDER BY c.collected_at DESC
+        ORDER BY t.collected_at DESC
         LIMIT :lim
     ");
     $params[':lim'] = $limit;
-    $rows->execute($params);
-    jsonOut(['collections' => $rows->fetchAll(PDO::FETCH_ASSOC), 'generated_at' => date('c')]);
+    $st->execute($params);
+    jsonOut(['collections' => $st->fetchAll(PDO::FETCH_ASSOC), 'generated_at' => date('c')]);
 }
 
-// ─── Route: route_map ────────────────────────────────────────────────────────
-// Returns all routes + decoded polylines for a specific collection (for map view)
+// ─── advisor_status ───────────────────────────────────────────────────────────
 
-if ($action === 'route_map') {
-    $collId = isset($_GET['collection_id']) ? (int)$_GET['collection_id'] : null;
-    if (!$collId) jsonError('collection_id is required', 400);
+if ($action === 'advisor_status') {
+    require_once $baseDir . '/AlertManager.php';
+    require_once $baseDir . '/DepartureAdvisor.php';
 
-    // Collection metadata
-    $st = $pdo->prepare("SELECT * FROM collections WHERE id = :id");
-    $st->execute([':id' => $collId]);
-    $collection = $st->fetch(PDO::FETCH_ASSOC);
-    if (!$collection) jsonError('Collection not found', 404);
+    $alertMgr = new AlertManager($config);
+    $advisor  = new DepartureAdvisor($config, $alertMgr);
+    jsonOut(['advisor' => $advisor->getStatus(), 'generated_at' => date('c')]);
+}
 
-    // All routes for this collection
-    $st = $pdo->prepare("SELECT * FROM routes WHERE collection_id = :id ORDER BY route_index");
-    $st->execute([':id' => $collId]);
-    $routes = $st->fetchAll(PDO::FETCH_ASSOC);
+// ─── get_settings ────────────────────────────────────────────────────────────
 
-    // Decode overview polyline from stored raw_response (smooth road-following curves)
-    $rawPolylines = [];
-    if (!empty($collection['raw_response'])) {
-        $raw = json_decode($collection['raw_response'], true);
-        foreach ($raw['routes'] ?? [] as $i => $apiRoute) {
-            $enc = $apiRoute['overview_polyline']['points'] ?? null;
-            if ($enc) $rawPolylines[$i] = decodePolyline($enc);
-        }
+if ($action === 'get_settings') {
+    // Return all settings except password hash
+    $st   = $pdo->query("SELECT key, value FROM settings ORDER BY key");
+    $rows = $st->fetchAll(PDO::FETCH_KEY_PAIR);
+    unset($rows['dashboard_password_hash']);
+    jsonOut(['settings' => $rows, 'generated_at' => date('c')]);
+}
+
+// ─── get_logs ────────────────────────────────────────────────────────────────
+
+if ($action === 'get_logs') {
+    $type   = $_GET['type'] ?? 'collector';
+    $map    = [
+        'collector' => $baseDir . '/data/collector.log',
+        'alerts'    => $baseDir . '/data/alerts.log',
+        'advisor'   => $baseDir . '/data/advisor.log',
+    ];
+
+    if (!isset($map[$type])) {
+        jsonError('Unknown log type', 400);
     }
 
-    // Attach steps + polyline to each route
-    foreach ($routes as &$route) {
-        $st = $pdo->prepare("
-            SELECT step_index, instruction, distance_meters, duration_seconds,
-                   road_name, start_lat, start_lng, end_lat, end_lng
-            FROM route_steps WHERE route_id = :id ORDER BY step_index
-        ");
-        $st->execute([':id' => $route['id']]);
-        $route['steps']    = $st->fetchAll(PDO::FETCH_ASSOC);
-        $route['polyline'] = $rawPolylines[$route['route_index']] ?? null;
+    $path  = $map[$type];
+    $lines = [];
 
-        // Fall back to step waypoints if no overview polyline
-        if (empty($route['polyline']) && !empty($route['steps'])) {
-            $pts = [];
-            foreach ($route['steps'] as $s) {
-                if ($s['start_lat'] !== null) $pts[] = [(float)$s['start_lat'], (float)$s['start_lng']];
-                if ($s['end_lat']   !== null) $pts[] = [(float)$s['end_lat'],   (float)$s['end_lng']];
-            }
-            $route['polyline'] = $pts;
-        }
+    if (file_exists($path)) {
+        $all   = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+        $lines = array_slice($all, -50); // last 50 lines
     }
-    unset($route);
 
-    // Nearby collections for the same route+day (for "browse other days" selector)
-    $st = $pdo->prepare("
-        SELECT id, collected_at, scheduled_time, schedule_mode,
-               (SELECT ROUND(COALESCE(r2.duration_in_traffic_seconds, r2.duration_seconds)/60.0, 1)
-                FROM routes r2 WHERE r2.collection_id = c.id AND r2.route_index = 0) AS primary_min
-        FROM collections c
-        WHERE route_id    = :route_id
-          AND scheduled_time = :sched_time
-          AND api_status  = 'OK'
-        ORDER BY collected_at DESC
-        LIMIT 30
-    ");
-    $st->execute([
-        ':route_id'   => $collection['route_id'],
-        ':sched_time' => $collection['scheduled_time'],
-    ]);
-    $siblings = $st->fetchAll(PDO::FETCH_ASSOC);
+    jsonOut(['log' => $lines, 'type' => $type, 'generated_at' => date('c')]);
+}
 
-    // Strip raw_response from output (it's large and not needed by the client)
-    unset($collection['raw_response']);
+// ─── db_stats ─────────────────────────────────────────────────────────────────
+
+if ($action === 'db_stats') {
+    $tripCount  = $pdo->query("SELECT COUNT(*) FROM trips")->fetchColumn();
+    $routeCount = $pdo->query("SELECT COUNT(*) FROM routes WHERE active=1")->fetchColumn();
+    $firstTrip  = $pdo->query("SELECT MIN(collected_at) FROM trips")->fetchColumn();
+    $lastTrip   = $pdo->query("SELECT MAX(collected_at) FROM trips")->fetchColumn();
+    $dbSize     = file_exists($config->getDbPath()) ? filesize($config->getDbPath()) : 0;
 
     jsonOut([
-        'collection' => $collection,
-        'routes'     => $routes,
-        'siblings'   => $siblings,
+        'trip_count'   => (int)$tripCount,
+        'route_count'  => (int)$routeCount,
+        'first_trip'   => $firstTrip ?: null,
+        'last_trip'    => $lastTrip  ?: null,
+        'db_size_bytes' => (int)$dbSize,
+        'generated_at' => date('c'),
     ]);
+}
+
+// ─── export_trips ────────────────────────────────────────────────────────────
+
+if ($action === 'export_trips') {
+    $rows = $pdo->query("
+        SELECT t.*, r.label AS route_label, r.origin, r.destination
+        FROM trips t LEFT JOIN routes r ON r.id = t.route_id
+        ORDER BY t.collected_at DESC
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="trips_export_' . date('Ymd_His') . '.csv"');
+    header('Cache-Control: no-cache');
+
+    $out = fopen('php://output', 'w');
+    if (!empty($rows)) {
+        fputcsv($out, array_keys($rows[0]));
+        foreach ($rows as $row) {
+            fputcsv($out, $row);
+        }
+    }
+    fclose($out);
+    exit;
+}
+
+// ─── test_collection ──────────────────────────────────────────────────────────
+
+if ($action === 'test_collection') {
+    $rid   = $routeId ?? ($_GET['route_id'] ?? null);
+    if (!$rid) {
+        jsonError('route_id is required', 400);
+    }
+
+    $route = $config->getRoute($rid);
+    if (!$route) {
+        jsonError("Route not found: {$rid}", 404);
+    }
+
+    require_once $baseDir . '/collector.php';
+
+    $params = [
+        'origin'         => $route['origin'],
+        'destination'    => $route['destination'],
+        'mode'           => $route['travel_mode'] ?? 'driving',
+        'departure_time' => 'now',
+        'language'       => $config->getSetting('google_maps_language', 'el'),
+        'region'         => $config->getSetting('google_maps_region', 'gr'),
+        'key'            => $config->getApiKey(),
+        'alternatives'   => 'true',
+    ];
+
+    $url      = 'https://maps.googleapis.com/maps/api/directions/json?' . http_build_query($params);
+    $response = callApi($url);
+
+    if ($response === null) {
+        jsonError('cURL error calling Google Maps API', 500);
+    }
+
+    $data   = json_decode($response, true);
+    $status = $data['status'] ?? 'UNKNOWN';
+
+    $routes = [];
+    foreach ($data['routes'] ?? [] as $i => $r) {
+        $leg     = $r['legs'][0] ?? [];
+        $routes[] = [
+            'index'    => $i,
+            'summary'  => $r['summary'] ?? '',
+            'duration' => $leg['duration']['text'] ?? '?',
+            'traffic'  => $leg['duration_in_traffic']['text'] ?? null,
+            'distance' => $leg['distance']['text'] ?? '?',
+        ];
+    }
+
+    jsonOut([
+        'status'    => $status,
+        'route_id'  => $rid,
+        'label'     => $route['label'],
+        'routes'    => $routes,
+        'error'     => $data['error_message'] ?? null,
+        'tested_at' => date('c'),
+    ]);
+}
+
+// ─── run_advisor ─────────────────────────────────────────────────────────────
+
+if ($action === 'run_advisor') {
+    require_once $baseDir . '/AlertManager.php';
+    require_once $baseDir . '/collector.php';
+    require_once $baseDir . '/DepartureAdvisor.php';
+
+    $alertMgr = new AlertManager($config);
+    $advisor  = new DepartureAdvisor($config, $alertMgr);
+    $logFile  = $baseDir . '/data/advisor.log';
+    $collLog  = $baseDir . '/data/collector.log';
+
+    $processed = [];
+
+    foreach ($config->getAllActiveRoutes() as $route) {
+        if (!empty($route['advisor_enabled'])) {
+            foreach ($route['schedule'] ?? [] as $sched) {
+                if (isset($sched['arrive'])) {
+                    $advisor->run($route, $sched);
+                    $processed[] = $route['id'];
+                }
+            }
+        }
+    }
+
+    jsonOut(['ran_for' => array_unique($processed), 'run_at' => date('c')]);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// WRITE actions (POST)
+// ═════════════════════════════════════════════════════════════════════════════
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    // ─── save_setting ─────────────────────────────────────────────────────────
+
+    if ($action === 'save_setting') {
+        $body = getPostData();
+
+        if (isset($body['settings']) && is_array($body['settings'])) {
+            $pairs = $body['settings'];
+        } elseif (isset($body['key'])) {
+            $pairs = [$body['key'] => $body['value'] ?? ''];
+        } else {
+            jsonError('Expected {key, value} or {settings: {}}', 400);
+        }
+
+        // Never allow overwriting password hash via this endpoint
+        unset($pairs['dashboard_password_hash']);
+
+        $config->setSettings($pairs);
+        jsonOut(['ok' => true, 'saved' => array_keys($pairs)]);
+    }
+
+    // ─── change_password ──────────────────────────────────────────────────────
+
+    if ($action === 'change_password') {
+        $body    = getPostData();
+        $current = $body['current']      ?? '';
+        $newPw   = $body['new_password'] ?? '';
+        $confirm = $body['confirm']      ?? '';
+
+        if (!password_verify($current, $config->getDashboardPasswordHash())) {
+            jsonError('Current password is incorrect', 403);
+        }
+        if (strlen($newPw) < 6) {
+            jsonError('New password must be at least 6 characters', 400);
+        }
+        if ($newPw !== $confirm) {
+            jsonError('Passwords do not match', 400);
+        }
+
+        $hash = password_hash($newPw, PASSWORD_DEFAULT);
+        $config->setSetting('dashboard_password_hash', $hash);
+        jsonOut(['ok' => true]);
+    }
+
+    // ─── save_route ───────────────────────────────────────────────────────────
+
+    if ($action === 'save_route') {
+        $body = getPostData();
+
+        $id = trim($body['id'] ?? '');
+        if (!$id || !preg_match('/^[a-z0-9_\-]+$/', $id)) {
+            jsonError('Route ID must be lowercase alphanumeric/underscore/dash', 400);
+        }
+
+        $label       = trim($body['label']       ?? '');
+        $origin      = trim($body['origin']       ?? '');
+        $destination = trim($body['destination']  ?? '');
+
+        if (!$label || !$origin || !$destination) {
+            jsonError('label, origin, and destination are required', 400);
+        }
+
+        $schedule       = $body['schedule']        ?? [];
+        $alertChannels  = $body['alert_channels']  ?? [];
+        $advisorStages  = $body['advisor_stages']  ?? ['planning','window','reminder','urgent','last_call'];
+
+        $now = date('Y-m-d H:i:s');
+
+        // Check if exists
+        $existing = $pdo->prepare("SELECT id FROM routes WHERE id = :id");
+        $existing->execute([':id' => $id]);
+        $isUpdate = (bool)$existing->fetchColumn();
+
+        if ($isUpdate) {
+            $st = $pdo->prepare("
+                UPDATE routes SET
+                    label = :label,
+                    origin = :origin,
+                    destination = :destination,
+                    travel_mode = :travel_mode,
+                    schedule = :schedule,
+                    advisor_enabled = :advisor_enabled,
+                    advisor_start_before = :advisor_start_before,
+                    advisor_buffer_mode = :advisor_buffer_mode,
+                    advisor_fixed_buffer = :advisor_fixed_buffer,
+                    advisor_stages = :advisor_stages,
+                    alert_channels = :alert_channels,
+                    active = :active,
+                    updated_at = :updated_at
+                WHERE id = :id
+            ");
+        } else {
+            $st = $pdo->prepare("
+                INSERT INTO routes
+                    (id, label, origin, destination, travel_mode, schedule,
+                     advisor_enabled, advisor_start_before, advisor_buffer_mode,
+                     advisor_fixed_buffer, advisor_stages, alert_channels, active,
+                     created_at, updated_at)
+                VALUES
+                    (:id, :label, :origin, :destination, :travel_mode, :schedule,
+                     :advisor_enabled, :advisor_start_before, :advisor_buffer_mode,
+                     :advisor_fixed_buffer, :advisor_stages, :alert_channels, :active,
+                     :created_at, :updated_at)
+            ");
+        }
+
+        $params = [
+            ':id'                   => $id,
+            ':label'                => $label,
+            ':origin'               => $origin,
+            ':destination'          => $destination,
+            ':travel_mode'          => $body['travel_mode']          ?? 'driving',
+            ':schedule'             => json_encode(is_array($schedule) ? $schedule : []),
+            ':advisor_enabled'      => (int)(bool)($body['advisor_enabled'] ?? 0),
+            ':advisor_start_before' => (int)($body['advisor_start_before'] ?? 90),
+            ':advisor_buffer_mode'  => $body['advisor_buffer_mode']   ?? 'auto',
+            ':advisor_fixed_buffer' => (int)($body['advisor_fixed_buffer'] ?? 10),
+            ':advisor_stages'       => json_encode(is_array($advisorStages) ? $advisorStages : []),
+            ':alert_channels'       => json_encode(is_array($alertChannels) ? $alertChannels : []),
+            ':active'               => (int)(bool)($body['active'] ?? 1),
+            ':updated_at'           => $now,
+        ];
+
+        if (!$isUpdate) {
+            $params[':created_at'] = $now;
+        }
+
+        $st->execute($params);
+
+        // Invalidate Config route cache
+        Config::reset();
+        $config = Config::load($baseDir);
+
+        jsonOut(['ok' => true, 'id' => $id, 'created' => !$isUpdate]);
+    }
+
+    // ─── delete_route ─────────────────────────────────────────────────────────
+
+    if ($action === 'delete_route') {
+        $body = getPostData();
+        $id   = trim($body['id'] ?? '');
+
+        if (!$id) {
+            jsonError('Route ID is required', 400);
+        }
+
+        $st = $pdo->prepare("DELETE FROM routes WHERE id = :id");
+        $st->execute([':id' => $id]);
+        $deleted = $st->rowCount();
+
+        Config::reset();
+        $config = Config::load($baseDir);
+
+        jsonOut(['ok' => $deleted > 0, 'deleted' => $deleted > 0]);
+    }
+
+    // ─── test_alert ───────────────────────────────────────────────────────────
+
+    if ($action === 'test_alert') {
+        $body    = getPostData();
+        $channel = trim($body['channel'] ?? '');
+
+        if (!$channel) {
+            jsonError('channel is required', 400);
+        }
+
+        require_once $baseDir . '/AlertManager.php';
+        $alertMgr = new AlertManager($config);
+        $result   = $alertMgr->sendTestChannel($channel);
+
+        jsonOut($result);
+    }
 }
 
 // ─── Unknown action ───────────────────────────────────────────────────────────
 
 jsonError("Unknown action: {$action}");
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatRows(array $rows): array
-{
-    foreach ($rows as &$row) {
-        foreach (['avg_duration', 'min_duration', 'max_duration'] as $f) {
-            if (isset($row[$f])) {
-                $row[$f] = (float)round($row[$f]);
-            }
-        }
-        if (isset($row['avg_distance_meters'])) {
-            $row['avg_distance_meters'] = (int)round($row['avg_distance_meters']);
-        }
-    }
-    return $rows;
-}
-
-/**
- * Decode a Google Maps encoded polyline string into an array of [lat, lng] pairs.
- * Algorithm: https://developers.google.com/maps/documentation/utilities/polylinealgorithm
- */
-function decodePolyline(string $encoded): array
-{
-    $points = [];
-    $index  = 0;
-    $len    = strlen($encoded);
-    $lat    = 0;
-    $lng    = 0;
-
-    while ($index < $len) {
-        // Decode one coordinate component (lat or lng)
-        $decode = function() use (&$index, $len, $encoded): int {
-            $result = 0;
-            $shift  = 0;
-            do {
-                $b      = ord($encoded[$index++]) - 63;
-                $result |= ($b & 0x1f) << $shift;
-                $shift  += 5;
-            } while ($b >= 0x20 && $index < $len);
-            return ($result & 1) ? ~($result >> 1) : ($result >> 1);
-        };
-
-        $lat += $decode();
-        $lng += $decode();
-        $points[] = [round($lat * 1e-5, 6), round($lng * 1e-5, 6)];
-    }
-    return $points;
-}
