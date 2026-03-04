@@ -348,3 +348,76 @@ input[type=text].sched-time {
 .log-tab-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 #testResult { margin-top: 12px; }
+
+/* ─── Address picker widget ─────────────────────────────────────────────── */
+
+.addr-wrap {
+  position: relative;
+  display: flex;
+  gap: 4px;
+  align-items: stretch;
+}
+
+.addr-wrap input[type=text] {
+  flex: 1;
+  min-width: 0;   /* let flexbox shrink below intrinsic width */
+  margin-bottom: 0;
+}
+
+.addr-pick-btn,
+.addr-map-btn {
+  flex-shrink: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0 10px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font);
+  line-height: 1;
+  transition: border-color .15s, color .15s;
+  white-space: nowrap;
+}
+.addr-pick-btn:hover,
+.addr-map-btn:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* Dropdown list */
+.addr-dropdown {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 200;
+  max-height: 220px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+}
+.addr-dropdown.open { display: block; }
+
+.addr-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background .1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.addr-item:last-child { border-bottom: none; }
+.addr-item:hover { background: rgba(91,124,246,.12); color: var(--text); }
+
+.addr-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}

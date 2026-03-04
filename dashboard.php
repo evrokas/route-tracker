@@ -10,16 +10,16 @@ require_once $baseDir . '/auth.php';
 
 Auth::requireLogin();
 
-if (isset($_GET['logout'])) {
-    Auth::logout();
-    header('Location: login.php');
-    exit;
-}
-
 try {
     $config = Config::load($baseDir);
 } catch (Exception $e) {
     die('<pre>Config error: ' . htmlspecialchars($e->getMessage()) . "\n\nRun: php schema.php --init</pre>");
+}
+
+if (isset($_GET['logout'])) {
+    Auth::logout($config);
+    header('Location: login.php');
+    exit;
 }
 
 $apiBase = 'api.php';

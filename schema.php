@@ -163,6 +163,8 @@ if ($init) {
         'signal_api_url'          => '',
         'signal_sender'           => '',
         'signal_recipients'       => '',
+        'remember_token_hash'     => '',
+        'remember_token_expiry'   => '0',
     ];
 
     $st = $pdo->prepare("INSERT OR IGNORE INTO settings (key, value) VALUES (:key, :value)");

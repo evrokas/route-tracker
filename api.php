@@ -24,6 +24,7 @@
  *   ?action=db_stats
  *   ?action=export_trips
  *   ?action=export_config
+ *   ?action=address_history
  *
  * POST actions (JSON body or form data):
  *   ?action=save_setting     { key, value }  or  { settings: {key:value,...} }
@@ -183,6 +184,20 @@ if ($action === 'route_list') {
     }
 
     jsonOut(['routes' => $result, 'generated_at' => date('c')]);
+}
+
+// ─── address_history ──────────────────────────────────────────────────────────
+
+if ($action === 'address_history') {
+    // Return all distinct origin + destination values ever used in routes, sorted.
+    $rows = $pdo->query("
+        SELECT DISTINCT origin AS addr FROM routes WHERE origin  != ''
+        UNION
+        SELECT DISTINCT destination        FROM routes WHERE destination != ''
+        ORDER BY addr COLLATE NOCASE
+    ")->fetchAll(PDO::FETCH_COLUMN);
+
+    jsonOut(['addresses' => array_values($rows)]);
 }
 
 // ─── overview ─────────────────────────────────────────────────────────────────

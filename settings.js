@@ -162,6 +162,7 @@ function renderRouteList(routes) {
 function showRouteForm(route) {
   const wrap = document.getElementById('routeFormWrap');
   if (!wrap) return;
+  _addrCache = null;   // reset so fresh addresses are fetched on next picker open
   wrap.style.display = 'block';
 
   const r = route || {
@@ -207,11 +208,21 @@ function showRouteForm(route) {
 
       <div class="field-group">
         <label>Origin</label>
-        <input type="text" id="rf_origin" value="${escHtml(r.origin)}" placeholder="37.9838, 23.7275 or full address">
+        <div class="addr-wrap">
+          <input type="text" id="rf_origin" value="${escHtml(r.origin)}" placeholder="37.9838, 23.7275 or full address" autocomplete="off">
+          <button type="button" class="addr-pick-btn" title="Pick from previous addresses" onclick="toggleAddrPicker('rf_origin', this)">▾</button>
+          <button type="button" class="addr-map-btn" title="Preview on map" onclick="openAddrMap('rf_origin')">🗺</button>
+          <div class="addr-dropdown" id="dp_rf_origin"></div>
+        </div>
       </div>
       <div class="field-group">
         <label>Destination</label>
-        <input type="text" id="rf_dest" value="${escHtml(r.destination)}" placeholder="37.9838, 23.7275 or full address">
+        <div class="addr-wrap">
+          <input type="text" id="rf_dest" value="${escHtml(r.destination)}" placeholder="37.9838, 23.7275 or full address" autocomplete="off">
+          <button type="button" class="addr-pick-btn" title="Pick from previous addresses" onclick="toggleAddrPicker('rf_dest', this)">▾</button>
+          <button type="button" class="addr-map-btn" title="Preview on map" onclick="openAddrMap('rf_dest')">🗺</button>
+          <div class="addr-dropdown" id="dp_rf_dest"></div>
+        </div>
       </div>
       <div class="field-group">
         <label>Travel Mode</label>
@@ -359,6 +370,82 @@ async function saveRoute(originalId) {
 function cancelRouteForm() {
   const wrap = document.getElementById('routeFormWrap');
   if (wrap) { wrap.style.display = 'none'; wrap.innerHTML = ''; }
+  closeAllAddrDropdowns();
+}
+
+// ─── Address picker helpers ───────────────────────────────────────────────────
+
+let _addrCache = null;  // fetched once per form open
+
+async function _fetchAddresses() {
+  if (_addrCache !== null) return _addrCache;
+  const data = await apiGet({ action: 'address_history' });
+  _addrCache = data?.addresses || [];
+  return _addrCache;
+}
+
+function closeAllAddrDropdowns() {
+  document.querySelectorAll('.addr-dropdown').forEach(d => {
+    d.classList.remove('open');
+    d.innerHTML = '';
+  });
+}
+
+async function toggleAddrPicker(inputId, btn) {
+  const dropdown = document.getElementById('dp_' + inputId);
+  if (!dropdown) return;
+
+  // If already open, close it
+  if (dropdown.classList.contains('open')) {
+    dropdown.classList.remove('open');
+    dropdown.innerHTML = '';
+    return;
+  }
+
+  closeAllAddrDropdowns();
+
+  const addresses = await _fetchAddresses();
+  const input     = document.getElementById(inputId);
+  const filter    = (input?.value || '').toLowerCase();
+
+  // Filter to matching addresses; show all if input is empty
+  const matches = addresses.filter(a =>
+    filter === '' || a.toLowerCase().includes(filter)
+  );
+
+  if (matches.length === 0) {
+    dropdown.innerHTML = '<div class="addr-empty">No previous addresses found</div>';
+  } else {
+    dropdown.innerHTML = matches.map(a =>
+      `<div class="addr-item" onclick="selectAddr('${inputId}', ${JSON.stringify(a)})">${escHtml(a)}</div>`
+    ).join('');
+  }
+
+  dropdown.classList.add('open');
+
+  // Close when clicking outside
+  const onOutside = (e) => {
+    if (!dropdown.contains(e.target) && e.target !== btn && e.target !== input) {
+      dropdown.classList.remove('open');
+      dropdown.innerHTML = '';
+      document.removeEventListener('click', onOutside);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', onOutside), 0);
+}
+
+function selectAddr(inputId, address) {
+  const input = document.getElementById(inputId);
+  if (input) input.value = address;
+  closeAllAddrDropdowns();
+}
+
+function openAddrMap(inputId) {
+  const input = document.getElementById(inputId);
+  const addr  = input?.value?.trim();
+  if (!addr) { alert('Enter an address first.'); return; }
+  const url = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr);
+  window.open(url, '_blank', 'noopener,noreferrer');
 }
 
 async function deleteRoute(id, label) {

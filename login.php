@@ -1,7 +1,7 @@
 <?php
 /**
  * login.php — Route Tracker v3
- * Session-based login. Password hash stored in the settings table.
+ * Session-based login with optional remember-me cookie.
  * Default password after fresh install: changeme (set via Settings → General).
  */
 
@@ -30,16 +30,28 @@ if (!empty($_SESSION['rt_authed'])) {
     exit;
 }
 
+// ─── Handle logout with remember-me cleanup ───────────────────────────────────
+
+if (isset($_GET['logout'])) {
+    Auth::logout($config ?? null);
+    header('Location: login.php');
+    exit;
+}
+
 // ─── Handle POST ─────────────────────────────────────────────────────────────
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $submitted = $_POST['password'] ?? '';
+    $submitted  = $_POST['password']    ?? '';
+    $rememberMe = !empty($_POST['remember_me']);
 
     if (empty($passwordHash)) {
         $error = 'No password hash found. Run: php schema.php --init';
     } elseif (password_verify($submitted, $passwordHash)) {
         session_regenerate_id(true);
         $_SESSION['rt_authed'] = true;
+        if ($rememberMe && isset($config)) {
+            Auth::setRememberMe($config);
+        }
         header('Location: dashboard.php');
         exit;
     } else {
@@ -48,9 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 ?>
-
 <!DOCTYPE html>
-
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -93,6 +103,26 @@ input[type=password] {
   transition: border-color .15s;
 }
 input[type=password]:focus { border-color: #5b7cf6; }
+.remember-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+.remember-row input[type=checkbox] {
+  width: 15px;
+  height: 15px;
+  accent-color: #5b7cf6;
+  cursor: pointer;
+  margin: 0;
+}
+.remember-row label {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+  font-weight: 400;
+  cursor: pointer;
+}
 button {
   width: 100%;
   background: #5b7cf6;
@@ -130,6 +160,10 @@ button:hover { background: #4a6ee0; }
   <form method="post" action="login.php">
     <label for="password">Password</label>
     <input type="password" id="password" name="password" autofocus autocomplete="current-password">
+    <div class="remember-row">
+      <input type="checkbox" id="remember_me" name="remember_me" value="1">
+      <label for="remember_me">Remember me for 30 days</label>
+    </div>
     <button type="submit">Sign In</button>
   </form>
 </div>
