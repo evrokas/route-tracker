@@ -254,7 +254,7 @@ async function renderAdvisor(box) {
       <div class="card advisor-card">
         <div class="card-header">
           <span class="card-title">${r.route_label}</span>
-          <span class="card-badge badge-arrive">arrive ${r.arrive_time}</span>
+          <span class="card-badge badge-arrive">${r.days ? r.days + ' · ' : ''}arrive ${r.arrive_time}</span>
           ${gmapsLink(r.origin, r.destination)}
         </div>
         <div class="advisor-departure">
@@ -265,7 +265,6 @@ async function renderAdvisor(box) {
         ${liveMins !== null ? `
         <div class="card-unit">Live: ${liveMins} min${r.last_check ? ` · checked ${lastCheck}` : ''}</div>` : `
         <div class="card-unit muted-text">No live data yet today</div>`}
-        <div class="advisor-days">${r.days || ''}</div>
         <div class="advisor-stages">${stagesHtml}</div>
       </div>`;
   }
@@ -290,9 +289,13 @@ async function renderOverview(box) {
 
   let html = '<div class="cards-grid">';
   for (const r of rows) {
+    const matchedSched = (r.schedule || []).find(s =>
+      r.schedule_mode === 'arrive' ? s.arrive === r.scheduled_time : s.depart === r.scheduled_time
+    );
+    const daysLabel = matchedSched?.days || '';
     const badge = r.schedule_mode === 'arrive'
-      ? `<span class="card-badge badge-arrive">arrive ${r.scheduled_time}</span>`
-      : `<span class="card-badge badge-depart">depart ${r.scheduled_time}</span>`;
+      ? `<span class="card-badge badge-arrive">${daysLabel ? daysLabel + ' · ' : ''}arrive ${r.scheduled_time}</span>`
+      : `<span class="card-badge badge-depart">${daysLabel ? daysLabel + ' · ' : ''}depart ${r.scheduled_time}</span>`;
 
     const schedHtml = (r.schedule || []).map(s => {
       const t = s.arrive || s.depart || '';
