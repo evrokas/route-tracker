@@ -329,7 +329,7 @@ $currentTz = $config->getTimezone();
   </div>
 
   <div class="settings-section">
-    <div class="section-title-row">
+    <div class="section-title-row log-header">
       <span class="section-title">Recent Logs</span>
       <div class="log-tabs">
         <button class="log-tab-btn active" onclick="loadLog('collector', this)">Collector</button>

@@ -383,4 +383,6 @@ tbody td { padding: 9px 14px; vertical-align: middle; }
   .header  { padding: 10px 14px; }
   .content { padding: 14px; }
   .tab     { padding: 8px 12px; font-size: 12px; }
+  .tab-bar { padding: 0 8px; }          /* more room for tabs on narrow screens */
+  .header h1 { font-size: 1rem; min-width: 0; }
 }

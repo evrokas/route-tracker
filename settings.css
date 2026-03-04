@@ -102,8 +102,80 @@ input[type=text].sched-time {
   gap: 12px;
 }
 
+/* ─── Tablet / small desktop (≤ 600px) ──────────────────────────────────── */
 @media (max-width: 600px) {
-  .field-row-2, .field-row-3 { grid-template-columns: 1fr; }
+  .field-row-2,
+  .field-row-3 { grid-template-columns: 1fr; }
+}
+
+/* ─── Phone portrait (≤ 480px — iPhone 15 and similar) ──────────────────── */
+@media (max-width: 480px) {
+  /* ── Layout: reduce all padding ─────────────────────────────────── */
+  .settings-content { padding: 12px 12px 48px; }
+  .settings-section { padding: 14px; }
+
+  /* ── Field rows: stack vertically, buttons full-width ────────────── */
+  .field-row {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+  .field-row > input,
+  .field-row > select { flex: 1 1 100%; }
+  .field-row > button,
+  .field-row > .btn-primary,
+  .field-row > .btn-secondary { width: 100%; }
+
+  /* ── Form actions (Save Route / Cancel): stack ───────────────────── */
+  .form-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .form-actions > button,
+  .form-actions > .btn-primary,
+  .form-actions > .btn-secondary { width: 100%; }
+
+  /* ── Settings footer (Save General / Save Alerts): stack ─────────── */
+  .settings-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .settings-footer > button,
+  .settings-footer > .btn-primary { width: 100%; }
+
+  /* ── Section title row: wrap "+ Add Route" below title if needed ─── */
+  .section-title-row { flex-wrap: wrap; gap: 8px; }
+  .section-title-row > .btn-primary { align-self: flex-start; }
+
+  /* ── Log section: title + tab buttons wrap to two lines ──────────── */
+  .section-title-row.log-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .log-tabs { flex-wrap: wrap; }
+
+  /* ── Routes table: horizontal scroll ────────────────────────────── */
+  .routes-table        { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .routes-table table  { min-width: 480px; }
+
+  /* ── Schedule rows: wrap to two lines (days+mode / time+delete) ──── */
+  .sched-row { flex-wrap: wrap; row-gap: 6px; }
+  .sched-row > select          { flex: 1 1 calc(50% - 4px); min-width: 120px; }
+  .sched-row > input.sched-time { flex: 1 1 80px; }
+  .sched-row > .btn-tiny       { align-self: flex-end; }
+
+  /* ── Channel fields: keep toggle inline with icon+name ───────────── */
+  .channel-header { flex-wrap: nowrap; }
+
+  /* ── Stats grid: 2-per-row ───────────────────────────────────────── */
+  .stat-chip { flex: 1 1 calc(50% - 5px); min-width: 130px; }
+
+  /* ── Advisor details: full width ─────────────────────────────────── */
+  .advisor-details { width: 100%; }
+
+  /* ── Address picker: dropdown stays within section ───────────────── */
+  .addr-dropdown { max-height: 180px; }
+
+  /* ── Touch targets: ensure minimum 44px tap height ──────────────── */
+  .btn-tiny  { padding: 8px 12px; font-size: 12px; }
+  .log-tab-btn { padding: 7px 12px; }
+  .tab       { padding: 12px 14px; }
 }
 
 /* ─── Buttons ────────────────────────────────────────────────────────────── */
