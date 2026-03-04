@@ -405,18 +405,11 @@ async function toggleAddrPicker(inputId, btn) {
   closeAllAddrDropdowns();
 
   const addresses = await _fetchAddresses();
-  const input     = document.getElementById(inputId);
-  const filter    = (input?.value || '').toLowerCase();
 
-  // Filter to matching addresses; show all if input is empty
-  const matches = addresses.filter(a =>
-    filter === '' || a.toLowerCase().includes(filter)
-  );
-
-  if (matches.length === 0) {
+  if (addresses.length === 0) {
     dropdown.innerHTML = '<div class="addr-empty">No previous addresses found</div>';
   } else {
-    dropdown.innerHTML = matches.map(a =>
+    dropdown.innerHTML = addresses.map(a =>
       `<div class="addr-item" onclick="selectAddr('${inputId}', ${JSON.stringify(a)})">${escHtml(a)}</div>`
     ).join('');
   }
