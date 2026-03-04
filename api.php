@@ -481,7 +481,11 @@ if ($action === 'advisor_status') {
 
     $alertMgr = new AlertManager($config);
     $advisor  = new DepartureAdvisor($config, $alertMgr);
-    jsonOut(['advisor' => $advisor->getStatus(), 'generated_at' => date('c')]);
+    $status   = $advisor->getStatus();
+    if ($routeId) {
+        $status = array_values(array_filter($status, fn($r) => $r['route_id'] === $routeId));
+    }
+    jsonOut(['advisor' => $status, 'generated_at' => date('c')]);
 }
 
 // ─── get_settings ────────────────────────────────────────────────────────────

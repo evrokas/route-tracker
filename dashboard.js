@@ -200,7 +200,7 @@ function gmapsLink(origin, destination) {
 // TAB: Advisor
 // ═══════════════════════════════════════════════════════════════════════════
 async function renderAdvisor(box) {
-  const d    = await api({ action: 'advisor_status' });
+  const d    = await api({ action: 'advisor_status', ...filters() });
   const rows = d.advisor || [];
 
   const allRoutes = state.routes;
