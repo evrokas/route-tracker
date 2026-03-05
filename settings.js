@@ -180,7 +180,7 @@ async function showRouteForm(route) {
   // Load alert profiles for assignment checkboxes
   if (!_allAlertProfiles) {
     const apd = await apiGet({ action: 'alert_profiles_list' });
-    _allAlertProfiles = apd?.profiles || [];
+    _allAlertProfiles = apd?.alert_profiles || [];
   }
   const assignedIds = Array.isArray(r.alert_profile_ids) ? r.alert_profile_ids : [];
   const alertProfileCheckboxes = _allAlertProfiles.length
@@ -477,12 +477,12 @@ async function loadAlerts() {
 
   // Load channel profiles
   const cpData = await apiGet({ action: 'channel_profiles_list' });
-  _allChannelProfiles = cpData?.profiles || { telegram: [], email: [], signal: [], viber: [] };
+  _allChannelProfiles = cpData?.channel_profiles || { telegram: [], email: [], signal: [], viber: [] };
   ['telegram','email','signal','viber'].forEach(t => renderChannelProfileTable(t, _allChannelProfiles[t] || []));
 
   // Load alert profiles
   const apData = await apiGet({ action: 'alert_profiles_list' });
-  _allAlertProfiles = apData?.profiles || [];
+  _allAlertProfiles = apData?.alert_profiles || [];
   renderAlertProfileTable(_allAlertProfiles);
 }
 
@@ -698,7 +698,7 @@ async function saveChannelProfile(type, originalId) {
     setTimeout(async () => {
       cancelChannelProfileForm(type);
       const cpd = await apiGet({ action: 'channel_profiles_list' });
-      _allChannelProfiles = cpd?.profiles || { telegram: [], email: [], signal: [], viber: [] };
+      _allChannelProfiles = cpd?.channel_profiles || { telegram: [], email: [], signal: [], viber: [] };
       renderChannelProfileTable(type, _allChannelProfiles[type] || []);
     }, 600);
   } else {
@@ -712,7 +712,7 @@ async function deleteChannelProfile(type, id, label) {
   if (result?.ok) {
     _allChannelProfiles = null;
     const cpd = await apiGet({ action: 'channel_profiles_list' });
-    _allChannelProfiles = cpd?.profiles || { telegram: [], email: [], signal: [], viber: [] };
+    _allChannelProfiles = cpd?.channel_profiles || { telegram: [], email: [], signal: [], viber: [] };
     renderChannelProfileTable(type, _allChannelProfiles[type] || []);
   } else {
     alert('Error: ' + (result?.error || 'Delete failed'));
@@ -883,7 +883,7 @@ async function saveAlertProfile(originalId) {
     setTimeout(async () => {
       cancelAlertProfileForm();
       const apd = await apiGet({ action: 'alert_profiles_list' });
-      _allAlertProfiles = apd?.profiles || [];
+      _allAlertProfiles = apd?.alert_profiles || [];
       renderAlertProfileTable(_allAlertProfiles);
     }, 600);
   } else {
@@ -897,7 +897,7 @@ async function deleteAlertProfile(id, label) {
   if (result?.ok) {
     _allAlertProfiles = null;
     const apd = await apiGet({ action: 'alert_profiles_list' });
-    _allAlertProfiles = apd?.profiles || [];
+    _allAlertProfiles = apd?.alert_profiles || [];
     renderAlertProfileTable(_allAlertProfiles);
   } else {
     alert('Error: ' + (result?.error || 'Delete failed'));
