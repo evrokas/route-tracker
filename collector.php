@@ -214,7 +214,8 @@ function processRoute(array $route, PDO $pdo, Config $config, AlertManager $aler
         'api_status'               => 'OK',
     ]);
 
-    $avgDuration = getHistoricalAverage($pdo, $routeId, (int)$now->format('N'), $schedTime);
+    $minSamples  = (int)$config->getSetting('alert_min_samples', 5);
+    $avgDuration = getHistoricalAverage($pdo, $routeId, (int)$now->format('N'), $schedTime, $minSamples);
 
     $primaryArr          = $leg;
     $primaryArr['summary'] = $primarySummary;
@@ -281,7 +282,7 @@ function insertTrip(PDO $pdo, array $d): int
 
 // ─── Historical average ───────────────────────────────────────────────────────
 
-function getHistoricalAverage(PDO $pdo, string $routeId, int $day, string $schedTime): ?int
+function getHistoricalAverage(PDO $pdo, string $routeId, int $day, string $schedTime, int $minSamples = 5): ?int
 {
     $st = $pdo->prepare("
         SELECT AVG(traffic_duration_seconds) AS avg_dur,
@@ -295,7 +296,7 @@ function getHistoricalAverage(PDO $pdo, string $routeId, int $day, string $sched
     $st->execute([':route_id' => $routeId, ':day' => $day, ':sched_time' => $schedTime]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
 
-    if (!$row || (int)$row['samples'] < 5) {
+    if (!$row || (int)$row['samples'] < $minSamples) {
         return null;
     }
     return (int)round($row['avg_dur']);
