@@ -13,26 +13,33 @@
  *   ?action=by_month
  *   ?action=by_route_name
  *   ?action=by_week
- *   ?action=timeline        &limit=200
+ *   ?action=timeline           &limit=200
  *   ?action=best_routes
- *   ?action=collections     &limit=100
+ *   ?action=collections        &limit=100
  *   ?action=advisor_status
  *   ?action=get_settings
- *   ?action=test_collection &route_id=xxx
+ *   ?action=test_collection    &route_id=xxx
  *   ?action=run_advisor
- *   ?action=get_logs        &type=collector|alerts|advisor
+ *   ?action=get_logs           &type=collector|alerts|advisor
  *   ?action=db_stats
  *   ?action=export_trips
  *   ?action=export_config
  *   ?action=address_history
+ *   ?action=channel_profiles_list
+ *   ?action=alert_profiles_list
  *
  * POST actions (JSON body or form data):
- *   ?action=save_setting     { key, value }  or  { settings: {key:value,...} }
- *   ?action=save_route       { id, label, origin, ... }
- *   ?action=delete_route     { id }
- *   ?action=test_alert       { channel }
- *   ?action=change_password  { current, new_password, confirm }
- *   ?action=import_config    { version, settings:{}, routes:[] }
+ *   ?action=save_setting          { key, value }  or  { settings: {key:value,...} }
+ *   ?action=save_route            { id, label, origin, ... }
+ *   ?action=delete_route          { id }
+ *   ?action=change_password       { current, new_password, confirm }
+ *   ?action=import_config         { version, settings:{}, routes:[], channel_profiles:{}, alert_profiles:[] }
+ *   ?action=channel_profiles_save { type, id, label, ... }
+ *   ?action=channel_profiles_delete { type, id }
+ *   ?action=channel_profiles_test { type, id }
+ *   ?action=alert_profiles_save   { id, label, channels:[{type,profile_id},...], enabled }
+ *   ?action=alert_profiles_delete { id }
+ *   ?action=alert_profiles_test   { id }
  *
  * Global GET filters (for data queries):
  *   &route_id=xxx
@@ -162,7 +169,7 @@ if ($action === 'route_list') {
             'advisor_buffer_mode'  => $r['advisor_buffer_mode'] ?? 'auto',
             'advisor_fixed_buffer' => (int)($r['advisor_fixed_buffer'] ?? 10),
             'advisor_stages'       => $r['advisor_stages'] ?? ['planning','window','reminder','urgent','last_call'],
-            'alert_channels'       => $r['alert_channels'] ?? [],
+            'alert_profile_ids'    => $r['alert_profile_ids'] ?? [],
             'active'               => (bool)(int)($r['active'] ?? 1),
         ];
     }, $routes);
@@ -178,7 +185,7 @@ if ($action === 'route_list') {
                 'advisor_start_before' => 90, 'advisor_buffer_mode' => 'auto',
                 'advisor_fixed_buffer' => 10,
                 'advisor_stages' => ['planning','window','reminder','urgent','last_call'],
-                'alert_channels' => [], 'active' => true,
+                'alert_profile_ids' => [], 'active' => true,
             ], $rows);
         } catch (Exception $e) {}
     }
@@ -586,19 +593,21 @@ if ($action === 'export_config') {
             'advisor_start_before' => (int)$r['advisor_start_before'],
             'advisor_buffer_mode'  => $r['advisor_buffer_mode'],
             'advisor_fixed_buffer' => (int)$r['advisor_fixed_buffer'],
-            'advisor_stages'       => $r['advisor_stages'],  // already decoded array
-            'alert_channels'       => $r['alert_channels'],  // already decoded array
+            'advisor_stages'       => $r['advisor_stages'],     // already decoded array
+            'alert_profile_ids'    => $r['alert_profile_ids'],  // already decoded array
             'active'               => (int)$r['active'],
             'created_at'           => $r['created_at'],
         ];
     }, $config->getAllRoutes());
 
     $backup = [
-        'version'     => 3,
-        'app'         => 'Route Tracker',
-        'exported_at' => date('c'),
-        'settings'    => $settings,
-        'routes'      => $routes,
+        'version'          => 3,
+        'app'              => 'Route Tracker',
+        'exported_at'      => date('c'),
+        'settings'         => $settings,
+        'routes'           => $routes,
+        'channel_profiles' => $config->getAllChannelProfiles(),
+        'alert_profiles'   => $config->getAllAlertProfiles(),
     ];
 
     $filename = 'tracker_config_' . date('Ymd_His') . '.json';
@@ -638,36 +647,58 @@ if ($action === 'import_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT OR REPLACE INTO routes
                     (id, label, origin, destination, travel_mode, schedule,
                      advisor_enabled, advisor_start_before, advisor_buffer_mode,
-                     advisor_fixed_buffer, advisor_stages, alert_channels, active,
+                     advisor_fixed_buffer, advisor_stages, alert_profile_ids, active,
                      created_at, updated_at)
                 VALUES
                     (:id, :label, :origin, :destination, :travel_mode, :schedule,
                      :advisor_enabled, :advisor_start_before, :advisor_buffer_mode,
-                     :advisor_fixed_buffer, :advisor_stages, :alert_channels, :active,
+                     :advisor_fixed_buffer, :advisor_stages, :alert_profile_ids, :active,
                      :created_at, :updated_at)
             ");
             foreach ($body['routes'] as $r) {
                 if (empty($r['id']) || empty($r['label'])) continue;
-                // Normalise JSON fields: accept either arrays (from export) or raw JSON strings
                 $encodeIfArray = fn($v, $default) => is_array($v) ? json_encode($v, JSON_UNESCAPED_UNICODE) : ($v ?? $default);
+                $profileIds = $r['alert_profile_ids'] ?? $r['alert_channels'] ?? null;
                 $st->execute([
                     ':id'                   => $r['id'],
                     ':label'                => $r['label'],
-                    ':origin'               => $r['origin']               ?? '',
-                    ':destination'          => $r['destination']          ?? '',
-                    ':travel_mode'          => $r['travel_mode']          ?? 'driving',
-                    ':schedule'             => $encodeIfArray($r['schedule']        ?? null, '[]'),
-                    ':advisor_enabled'      => (int)($r['advisor_enabled']      ?? 0),
-                    ':advisor_start_before' => (int)($r['advisor_start_before']  ?? 90),
-                    ':advisor_buffer_mode'  => $r['advisor_buffer_mode']  ?? 'auto',
-                    ':advisor_fixed_buffer' => (int)($r['advisor_fixed_buffer']  ?? 10),
-                    ':advisor_stages'       => $encodeIfArray($r['advisor_stages']  ?? null, '["planning","window","reminder","urgent","last_call"]'),
-                    ':alert_channels'       => $encodeIfArray($r['alert_channels'] ?? null, '[]'),
+                    ':origin'               => $r['origin']              ?? '',
+                    ':destination'          => $r['destination']         ?? '',
+                    ':travel_mode'          => $r['travel_mode']         ?? 'driving',
+                    ':schedule'             => $encodeIfArray($r['schedule']      ?? null, '[]'),
+                    ':advisor_enabled'      => (int)($r['advisor_enabled']        ?? 0),
+                    ':advisor_start_before' => (int)($r['advisor_start_before']   ?? 90),
+                    ':advisor_buffer_mode'  => $r['advisor_buffer_mode']           ?? 'auto',
+                    ':advisor_fixed_buffer' => (int)($r['advisor_fixed_buffer']   ?? 10),
+                    ':advisor_stages'       => $encodeIfArray($r['advisor_stages'] ?? null, '["planning","window","reminder","urgent","last_call"]'),
+                    ':alert_profile_ids'    => $encodeIfArray($profileIds,          '[]'),
                     ':active'               => (int)($r['active'] ?? 1),
                     ':created_at'           => $r['created_at'] ?? date('c'),
                     ':updated_at'           => date('c'),
                 ]);
                 $routesImported++;
+            }
+        }
+
+        // Restore channel profiles
+        $profilesImported = 0;
+        if (!empty($body['channel_profiles']) && is_array($body['channel_profiles'])) {
+            foreach ($body['channel_profiles'] as $type => $profiles) {
+                foreach ((array)$profiles as $p) {
+                    if (empty($p['id'])) continue;
+                    try { $config->saveChannelProfile($type, $p); $profilesImported++; }
+                    catch (Exception $e) { /* skip unknown types */ }
+                }
+            }
+        }
+
+        // Restore alert profiles
+        $alertProfilesImported = 0;
+        if (!empty($body['alert_profiles']) && is_array($body['alert_profiles'])) {
+            foreach ($body['alert_profiles'] as $p) {
+                if (empty($p['id'])) continue;
+                $config->saveAlertProfile($p);
+                $alertProfilesImported++;
             }
         }
 
@@ -680,9 +711,11 @@ if ($action === 'import_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     jsonOut([
-        'ok'               => true,
-        'settings_updated' => $settingsUpdated,
-        'routes_imported'  => $routesImported,
+        'ok'                      => true,
+        'settings_updated'        => $settingsUpdated,
+        'routes_imported'         => $routesImported,
+        'profiles_imported'       => $profilesImported,
+        'alert_profiles_imported' => $alertProfilesImported,
     ]);
 }
 
@@ -839,9 +872,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             jsonError('label, origin, and destination are required', 400);
         }
 
-        $schedule       = $body['schedule']        ?? [];
-        $alertChannels  = $body['alert_channels']  ?? [];
-        $advisorStages  = $body['advisor_stages']  ?? ['planning','window','reminder','urgent','last_call'];
+        $schedule        = $body['schedule']          ?? [];
+        $alertProfileIds = $body['alert_profile_ids'] ?? [];
+        $advisorStages   = $body['advisor_stages']    ?? ['planning','window','reminder','urgent','last_call'];
 
         $now = date('Y-m-d H:i:s');
 
@@ -863,7 +896,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     advisor_buffer_mode = :advisor_buffer_mode,
                     advisor_fixed_buffer = :advisor_fixed_buffer,
                     advisor_stages = :advisor_stages,
-                    alert_channels = :alert_channels,
+                    alert_profile_ids = :alert_profile_ids,
                     active = :active,
                     updated_at = :updated_at
                 WHERE id = :id
@@ -873,12 +906,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO routes
                     (id, label, origin, destination, travel_mode, schedule,
                      advisor_enabled, advisor_start_before, advisor_buffer_mode,
-                     advisor_fixed_buffer, advisor_stages, alert_channels, active,
+                     advisor_fixed_buffer, advisor_stages, alert_profile_ids, active,
                      created_at, updated_at)
                 VALUES
                     (:id, :label, :origin, :destination, :travel_mode, :schedule,
                      :advisor_enabled, :advisor_start_before, :advisor_buffer_mode,
-                     :advisor_fixed_buffer, :advisor_stages, :alert_channels, :active,
+                     :advisor_fixed_buffer, :advisor_stages, :alert_profile_ids, :active,
                      :created_at, :updated_at)
             ");
         }
@@ -895,7 +928,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':advisor_buffer_mode'  => $body['advisor_buffer_mode']   ?? 'auto',
             ':advisor_fixed_buffer' => (int)($body['advisor_fixed_buffer'] ?? 10),
             ':advisor_stages'       => json_encode(is_array($advisorStages) ? $advisorStages : []),
-            ':alert_channels'       => json_encode(is_array($alertChannels) ? $alertChannels : []),
+            ':alert_profile_ids'    => json_encode(is_array($alertProfileIds) ? $alertProfileIds : []),
             ':active'               => (int)(bool)($body['active'] ?? 1),
             ':updated_at'           => $now,
         ];
@@ -933,22 +966,128 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         jsonOut(['ok' => $deleted > 0, 'deleted' => $deleted > 0]);
     }
 
-    // ─── test_alert ───────────────────────────────────────────────────────────
+    // ─── channel_profiles_save ────────────────────────────────────────────────
 
-    if ($action === 'test_alert') {
-        $body    = getPostData();
-        $channel = trim($body['channel'] ?? '');
+    if ($action === 'channel_profiles_save') {
+        $body = getPostData();
+        $type = trim($body['type'] ?? '');
+        $id   = trim($body['id']   ?? '');
 
-        if (!$channel) {
-            jsonError('channel is required', 400);
+        if (!in_array($type, ['telegram','email','signal','viber'], true)) {
+            jsonError('Invalid channel type', 400);
+        }
+        if (!$id || !preg_match('/^[a-z0-9_-]+$/', $id)) {
+            jsonError('Profile ID must be lowercase alphanumeric/underscore/dash', 400);
+        }
+        if (empty($body['label'])) {
+            jsonError('label is required', 400);
         }
 
-        require_once $baseDir . '/AlertManager.php';
-        $alertMgr = new AlertManager($config);
-        $result   = $alertMgr->sendTestChannel($channel);
+        $config->saveChannelProfile($type, $body);
+        jsonOut(['ok' => true, 'id' => $id]);
+    }
 
+    // ─── channel_profiles_delete ─────────────────────────────────────────────
+
+    if ($action === 'channel_profiles_delete') {
+        $body = getPostData();
+        $type = trim($body['type'] ?? '');
+        $id   = trim($body['id']   ?? '');
+
+        if (!in_array($type, ['telegram','email','signal','viber'], true)) {
+            jsonError('Invalid channel type', 400);
+        }
+        if (!$id) {
+            jsonError('id is required', 400);
+        }
+
+        // Guard: cannot delete if used by an alert profile
+        foreach ($config->getAllAlertProfiles() as $ap) {
+            foreach ($ap['channels'] as $binding) {
+                if ($binding['type'] === $type && $binding['profile_id'] === $id) {
+                    jsonError("Cannot delete: profile '{$id}' is used by alert profile '{$ap['id']}'", 409);
+                }
+            }
+        }
+
+        $config->deleteChannelProfile($type, $id);
+        jsonOut(['ok' => true]);
+    }
+
+    // ─── channel_profiles_test ───────────────────────────────────────────────
+
+    if ($action === 'channel_profiles_test') {
+        require_once $baseDir . '/AlertManager.php';
+        $body = getPostData();
+        $type = trim($body['type'] ?? '');
+        $id   = trim($body['id']   ?? '');
+
+        $alertMgr = new AlertManager($config);
+        $result   = $alertMgr->sendTestChannelProfile($type, $id);
         jsonOut($result);
     }
+
+    // ─── alert_profiles_save ─────────────────────────────────────────────────
+
+    if ($action === 'alert_profiles_save') {
+        $body = getPostData();
+        $id   = trim($body['id'] ?? '');
+
+        if (!$id || !preg_match('/^[a-z0-9_-]+$/', $id)) {
+            jsonError('Profile ID must be lowercase alphanumeric/underscore/dash', 400);
+        }
+        if (empty($body['label'])) {
+            jsonError('label is required', 400);
+        }
+
+        $config->saveAlertProfile($body);
+        jsonOut(['ok' => true, 'id' => $id]);
+    }
+
+    // ─── alert_profiles_delete ───────────────────────────────────────────────
+
+    if ($action === 'alert_profiles_delete') {
+        $body = getPostData();
+        $id   = trim($body['id'] ?? '');
+
+        if (!$id) {
+            jsonError('id is required', 400);
+        }
+
+        // Guard: cannot delete if assigned to a route
+        foreach ($config->getAllRoutes() as $route) {
+            if (in_array($id, $route['alert_profile_ids'] ?? [], true)) {
+                jsonError("Cannot delete: profile '{$id}' is assigned to route '{$route['id']}'", 409);
+            }
+        }
+
+        $config->deleteAlertProfile($id);
+        jsonOut(['ok' => true]);
+    }
+
+    // ─── alert_profiles_test ─────────────────────────────────────────────────
+
+    if ($action === 'alert_profiles_test') {
+        require_once $baseDir . '/AlertManager.php';
+        $body = getPostData();
+        $id   = trim($body['id'] ?? '');
+
+        $alertMgr = new AlertManager($config);
+        $result   = $alertMgr->sendTestAlertProfile($id);
+        jsonOut($result);
+    }
+}
+
+// ─── channel_profiles_list ────────────────────────────────────────────────────
+
+if ($action === 'channel_profiles_list') {
+    jsonOut(['channel_profiles' => $config->getAllChannelProfiles(), 'generated_at' => date('c')]);
+}
+
+// ─── alert_profiles_list ──────────────────────────────────────────────────────
+
+if ($action === 'alert_profiles_list') {
+    jsonOut(['alert_profiles' => $config->getAllAlertProfiles(), 'generated_at' => date('c')]);
 }
 
 // ─── Unknown action ───────────────────────────────────────────────────────────

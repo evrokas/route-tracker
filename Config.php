@@ -5,7 +5,7 @@
  * SQLite-backed configuration loader. Replaces YAML-based v2 loader.
  *
  * All settings come from the `settings` table; routes from the `routes` table.
- * Public method signatures are preserved for backward compatibility.
+ * Alert channel credentials live in per-type profile tables.
  */
 
 class Config
@@ -106,15 +106,11 @@ class Config
 
     public function get(string $dotKey, $default = null)
     {
-        // In v3 the dotKey IS the settings table key (no nesting needed)
-        // Legacy dot-keys like 'google_maps.api_key' → 'google_maps_api_key'
         $flat = str_replace('.', '_', $dotKey);
 
         if (array_key_exists($flat, $this->settings)) {
             return $this->settings[$flat];
         }
-
-        // Also try the original key as-is
         if (array_key_exists($dotKey, $this->settings)) {
             return $this->settings[$dotKey];
         }
@@ -151,7 +147,7 @@ class Config
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Convenience getters (preserve v2 interface)
+    // Convenience getters
     // ──────────────────────────────────────────────────────────────────────────
 
     public function getApiKey(): string
@@ -212,7 +208,7 @@ class Config
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Route getters (query routes table)
+    // Route getters
     // ──────────────────────────────────────────────────────────────────────────
 
     public function getAllRoutes(): array
@@ -252,14 +248,14 @@ class Config
         return null;
     }
 
-    /** Decode JSON fields and normalise a route DB row to the v2-compatible array format. */
+    /** Decode JSON fields and normalise a route DB row. */
     private function decodeRoute(array $row): array
     {
-        $row['schedule']        = json_decode($row['schedule']        ?? '[]', true) ?: [];
-        $row['advisor_stages']  = json_decode($row['advisor_stages']  ?? '[]', true) ?: [];
-        $row['alert_channels']  = json_decode($row['alert_channels']  ?? '[]', true) ?: [];
-        $row['advisor_enabled'] = (bool)(int)($row['advisor_enabled'] ?? 0);
-        $row['active']          = (bool)(int)($row['active']          ?? 1);
+        $row['schedule']          = json_decode($row['schedule']          ?? '[]', true) ?: [];
+        $row['advisor_stages']    = json_decode($row['advisor_stages']    ?? '[]', true) ?: [];
+        $row['alert_profile_ids'] = json_decode($row['alert_profile_ids'] ?? '[]', true) ?: [];
+        $row['advisor_enabled']   = (bool)(int)($row['advisor_enabled']   ?? 0);
+        $row['active']            = (bool)(int)($row['active']            ?? 1);
         return $row;
     }
 
@@ -267,16 +263,6 @@ class Config
     // Day parsing
     // ──────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Parse a day string into ISO day numbers (1=Mon .. 7=Sun).
-     *
-     * Accepts:
-     *   "Mon"             → [1]
-     *   "Mon,Wed,Fri"     → [1,3,5]
-     *   "Weekdays"        → [1,2,3,4,5]
-     *   "Weekends"        → [6,7]
-     *   "All"             → [1,2,3,4,5,6,7]
-     */
     public function parseDays(string $days): array
     {
         $lower = strtolower(trim($days));
@@ -299,12 +285,6 @@ class Config
     // Active route detection
     // ──────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Return active routes within their collection window right now.
-     *
-     * @param int|null    $dayOverride  ISO day (1–7). Null = current day.
-     * @param string|null $timeOverride "HH:MM". Null = current time.
-     */
     public function getActiveRoutes(?int $dayOverride = null, ?string $timeOverride = null): array
     {
         date_default_timezone_set($this->getTimezone());
@@ -318,7 +298,7 @@ class Config
 
         foreach ($this->getAllActiveRoutes() as $route) {
             foreach ($route['schedule'] ?? [] as $sched) {
-                $days    = $this->parseDays($sched['days'] ?? '');
+                $days = $this->parseDays($sched['days'] ?? '');
                 if (!in_array($curDay, $days, true)) {
                     continue;
                 }
@@ -340,7 +320,7 @@ class Config
                         '_scheduled_time' => $sched['arrive'] ?? $sched['depart'],
                         '_collect_at'     => $collectAt,
                     ]);
-                    break; // only add route once even if multiple entries match
+                    break;
                 }
             }
         }
@@ -352,7 +332,7 @@ class Config
     {
         [$h, $m] = explode(':', $arriveTime);
         $ts = mktime((int)$h, (int)$m, 0);
-        $ts -= 45 * 60; // 45 min earlier
+        $ts -= 45 * 60;
         return date('H:i', $ts);
     }
 
@@ -412,7 +392,7 @@ class Config
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Alert config getters (preserve v2 interface)
+    // Alert settings (thresholds — still from settings table)
     // ──────────────────────────────────────────────────────────────────────────
 
     public function getAlertSettings(): array
@@ -424,54 +404,301 @@ class Config
         ];
     }
 
-    public function getAlertConfig(string $channel): array
+    // ──────────────────────────────────────────────────────────────────────────
+    // Channel profile lookups
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function getTelegramProfile(string $id): ?array
     {
-        switch ($channel) {
-            case 'telegram':
-                return [
-                    'enabled'   => (bool)(int)$this->getSetting('telegram_enabled'),
-                    'bot_token' => $this->getSetting('telegram_bot_token'),
-                    'chat_ids'  => $this->parseCommaSeparated($this->getSetting('telegram_chat_ids')),
-                ];
-            case 'email':
-                return [
-                    'enabled'           => (bool)(int)$this->getSetting('email_enabled'),
-                    'method'            => 'smtp',
-                    'smtp_host'         => $this->getSetting('email_host'),
-                    'smtp_port'         => (int)$this->getSetting('email_port', '587'),
-                    'smtp_username'     => $this->getSetting('email_user'),
-                    'smtp_password'     => $this->getSetting('email_pass'),
-                    'from_address'      => $this->getSetting('email_from'),
-                    'from_name'         => 'Route Tracker',
-                    'recipients'        => $this->parseCommaSeparated($this->getSetting('email_to')),
-                ];
-            case 'viber':
-                return [
-                    'enabled'      => (bool)(int)$this->getSetting('viber_enabled'),
-                    'auth_token'   => $this->getSetting('viber_auth_token'),
-                    'receiver_ids' => $this->parseCommaSeparated($this->getSetting('viber_receiver_ids')),
-                ];
-            case 'signal':
-                return [
-                    'enabled'           => (bool)(int)$this->getSetting('signal_enabled'),
-                    'api_url'           => $this->getSetting('signal_api_url'),
-                    'sender_number'     => $this->getSetting('signal_sender'),
-                    'recipient_numbers' => $this->parseCommaSeparated($this->getSetting('signal_recipients')),
-                ];
-            default:
-                return [];
+        try {
+            $st = $this->pdo->prepare("SELECT * FROM telegram_profiles WHERE id = :id AND enabled = 1");
+            $st->execute([':id' => $id]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return null;
+            $row['chat_ids'] = $this->parseCommaSeparated($row['chat_ids']);
+            $row['enabled']  = (bool)(int)$row['enabled'];
+            return $row;
+        } catch (Exception $e) {
+            return null;
         }
     }
 
-    public function isAlertEnabled(string $channel): bool
+    public function getEmailProfile(string $id): ?array
     {
-        return (bool)(int)$this->getSetting($channel . '_enabled');
+        try {
+            $st = $this->pdo->prepare("SELECT * FROM email_profiles WHERE id = :id AND enabled = 1");
+            $st->execute([':id' => $id]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return null;
+            $row['recipients']  = $this->parseCommaSeparated($row['recipients']);
+            $row['smtp_port']   = (int)$row['smtp_port'];
+            $row['enabled']     = (bool)(int)$row['enabled'];
+            return $row;
+        } catch (Exception $e) {
+            return null;
+        }
     }
 
-    public function getRouteAlertChannels(array $route): array
+    public function getSignalProfile(string $id): ?array
     {
-        $routeChannels = $route['alert_channels'] ?? [];
-        return array_values(array_filter($routeChannels, fn($ch) => $this->isAlertEnabled($ch)));
+        try {
+            $st = $this->pdo->prepare("SELECT * FROM signal_profiles WHERE id = :id AND enabled = 1");
+            $st->execute([':id' => $id]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return null;
+            $row['recipient_numbers'] = $this->parseCommaSeparated($row['recipient_numbers']);
+            $row['enabled']           = (bool)(int)$row['enabled'];
+            return $row;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    public function getViberProfile(string $id): ?array
+    {
+        try {
+            $st = $this->pdo->prepare("SELECT * FROM viber_profiles WHERE id = :id AND enabled = 1");
+            $st->execute([':id' => $id]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return null;
+            $row['receiver_ids'] = $this->parseCommaSeparated($row['receiver_ids']);
+            $row['enabled']      = (bool)(int)$row['enabled'];
+            return $row;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Alert profile lookups
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** Returns one alert profile (enabled only). Channels decoded to array. */
+    public function getAlertProfile(string $id): ?array
+    {
+        try {
+            $st = $this->pdo->prepare("SELECT * FROM alert_profiles WHERE id = :id AND enabled = 1");
+            $st->execute([':id' => $id]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return null;
+            $row['channels'] = json_decode($row['channels'] ?? '[]', true) ?: [];
+            $row['enabled']  = (bool)(int)$row['enabled'];
+            return $row;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    /** Returns all alert profiles (including disabled), ordered by label. */
+    public function getAllAlertProfiles(): array
+    {
+        try {
+            $rows = $this->pdo->query("SELECT * FROM alert_profiles ORDER BY label")
+                              ->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            return [];
+        }
+        return array_map(function ($row) {
+            $row['channels'] = json_decode($row['channels'] ?? '[]', true) ?: [];
+            $row['enabled']  = (bool)(int)$row['enabled'];
+            return $row;
+        }, $rows);
+    }
+
+    /** Returns enabled alert profiles assigned to a route. */
+    public function getRouteAlertProfiles(array $route): array
+    {
+        $profileIds = $route['alert_profile_ids'] ?? [];
+        $profiles   = [];
+        foreach ($profileIds as $pid) {
+            $p = $this->getAlertProfile($pid);
+            if ($p) {
+                $profiles[] = $p;
+            }
+        }
+        return $profiles;
+    }
+
+    /**
+     * Returns all channel profiles grouped by type.
+     * Includes disabled profiles (for settings UI). Passwords returned in full
+     * (endpoint is auth-gated).
+     */
+    public function getAllChannelProfiles(): array
+    {
+        $result = [];
+        foreach (['telegram', 'email', 'signal', 'viber'] as $type) {
+            $table = $type . '_profiles';
+            try {
+                $rows = $this->pdo->query("SELECT * FROM {$table} ORDER BY label")
+                                  ->fetchAll(PDO::FETCH_ASSOC);
+                $result[$type] = array_map(function ($row) {
+                    $row['enabled'] = (bool)(int)$row['enabled'];
+                    return $row;
+                }, $rows);
+            } catch (Exception $e) {
+                $result[$type] = [];
+            }
+        }
+        return $result;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Channel profile CRUD
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function saveChannelProfile(string $type, array $data): void
+    {
+        $now = date('Y-m-d H:i:s');
+
+        switch ($type) {
+            case 'telegram':
+                $st = $this->pdo->prepare("
+                    INSERT INTO telegram_profiles (id, label, bot_token, chat_ids, enabled, created_at, updated_at)
+                    VALUES (:id, :label, :bot_token, :chat_ids, :enabled, :created_at, :updated_at)
+                    ON CONFLICT(id) DO UPDATE SET
+                        label = excluded.label, bot_token = excluded.bot_token,
+                        chat_ids = excluded.chat_ids, enabled = excluded.enabled,
+                        updated_at = excluded.updated_at
+                ");
+                $st->execute([
+                    ':id'         => $data['id'],
+                    ':label'      => $data['label'],
+                    ':bot_token'  => $data['bot_token']  ?? '',
+                    ':chat_ids'   => $data['chat_ids']   ?? '',
+                    ':enabled'    => (int)(bool)($data['enabled'] ?? 1),
+                    ':created_at' => $now,
+                    ':updated_at' => $now,
+                ]);
+                break;
+
+            case 'email':
+                $st = $this->pdo->prepare("
+                    INSERT INTO email_profiles
+                        (id, label, smtp_host, smtp_port, smtp_encryption, smtp_user, smtp_pass,
+                         from_address, from_name, recipients, enabled, created_at, updated_at)
+                    VALUES
+                        (:id, :label, :smtp_host, :smtp_port, :smtp_encryption, :smtp_user, :smtp_pass,
+                         :from_address, :from_name, :recipients, :enabled, :created_at, :updated_at)
+                    ON CONFLICT(id) DO UPDATE SET
+                        label = excluded.label, smtp_host = excluded.smtp_host,
+                        smtp_port = excluded.smtp_port, smtp_encryption = excluded.smtp_encryption,
+                        smtp_user = excluded.smtp_user, smtp_pass = excluded.smtp_pass,
+                        from_address = excluded.from_address, from_name = excluded.from_name,
+                        recipients = excluded.recipients, enabled = excluded.enabled,
+                        updated_at = excluded.updated_at
+                ");
+                $st->execute([
+                    ':id'              => $data['id'],
+                    ':label'           => $data['label'],
+                    ':smtp_host'       => $data['smtp_host']       ?? '',
+                    ':smtp_port'       => (int)($data['smtp_port'] ?? 587),
+                    ':smtp_encryption' => $data['smtp_encryption']  ?? 'tls',
+                    ':smtp_user'       => $data['smtp_user']        ?? '',
+                    ':smtp_pass'       => $data['smtp_pass']        ?? '',
+                    ':from_address'    => $data['from_address']     ?? '',
+                    ':from_name'       => $data['from_name']        ?? 'Route Tracker',
+                    ':recipients'      => $data['recipients']       ?? '',
+                    ':enabled'         => (int)(bool)($data['enabled'] ?? 1),
+                    ':created_at'      => $now,
+                    ':updated_at'      => $now,
+                ]);
+                break;
+
+            case 'signal':
+                $st = $this->pdo->prepare("
+                    INSERT INTO signal_profiles
+                        (id, label, api_url, sender_number, recipient_numbers, enabled, created_at, updated_at)
+                    VALUES
+                        (:id, :label, :api_url, :sender_number, :recipient_numbers, :enabled, :created_at, :updated_at)
+                    ON CONFLICT(id) DO UPDATE SET
+                        label = excluded.label, api_url = excluded.api_url,
+                        sender_number = excluded.sender_number,
+                        recipient_numbers = excluded.recipient_numbers,
+                        enabled = excluded.enabled, updated_at = excluded.updated_at
+                ");
+                $st->execute([
+                    ':id'               => $data['id'],
+                    ':label'            => $data['label'],
+                    ':api_url'          => $data['api_url']           ?? '',
+                    ':sender_number'    => $data['sender_number']     ?? '',
+                    ':recipient_numbers'=> $data['recipient_numbers'] ?? '',
+                    ':enabled'          => (int)(bool)($data['enabled'] ?? 1),
+                    ':created_at'       => $now,
+                    ':updated_at'       => $now,
+                ]);
+                break;
+
+            case 'viber':
+                $st = $this->pdo->prepare("
+                    INSERT INTO viber_profiles
+                        (id, label, auth_token, receiver_ids, enabled, created_at, updated_at)
+                    VALUES
+                        (:id, :label, :auth_token, :receiver_ids, :enabled, :created_at, :updated_at)
+                    ON CONFLICT(id) DO UPDATE SET
+                        label = excluded.label, auth_token = excluded.auth_token,
+                        receiver_ids = excluded.receiver_ids, enabled = excluded.enabled,
+                        updated_at = excluded.updated_at
+                ");
+                $st->execute([
+                    ':id'          => $data['id'],
+                    ':label'       => $data['label'],
+                    ':auth_token'  => $data['auth_token']  ?? '',
+                    ':receiver_ids'=> $data['receiver_ids'] ?? '',
+                    ':enabled'     => (int)(bool)($data['enabled'] ?? 1),
+                    ':created_at'  => $now,
+                    ':updated_at'  => $now,
+                ]);
+                break;
+
+            default:
+                throw new InvalidArgumentException("Unknown channel type: {$type}");
+        }
+    }
+
+    public function deleteChannelProfile(string $type, string $id): void
+    {
+        $allowed = ['telegram', 'email', 'signal', 'viber'];
+        if (!in_array($type, $allowed, true)) {
+            throw new InvalidArgumentException("Unknown channel type: {$type}");
+        }
+        $table = $type . '_profiles';
+        $st = $this->pdo->prepare("DELETE FROM {$table} WHERE id = :id");
+        $st->execute([':id' => $id]);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Alert profile CRUD
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public function saveAlertProfile(array $data): void
+    {
+        $now      = date('Y-m-d H:i:s');
+        $channels = is_array($data['channels'] ?? null)
+            ? json_encode($data['channels'], JSON_UNESCAPED_UNICODE)
+            : ($data['channels'] ?? '[]');
+
+        $st = $this->pdo->prepare("
+            INSERT INTO alert_profiles (id, label, channels, enabled, created_at, updated_at)
+            VALUES (:id, :label, :channels, :enabled, :created_at, :updated_at)
+            ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label, channels = excluded.channels,
+                enabled = excluded.enabled, updated_at = excluded.updated_at
+        ");
+        $st->execute([
+            ':id'         => $data['id'],
+            ':label'      => $data['label'],
+            ':channels'   => $channels,
+            ':enabled'    => (int)(bool)($data['enabled'] ?? 1),
+            ':created_at' => $now,
+            ':updated_at' => $now,
+        ]);
+    }
+
+    public function deleteAlertProfile(string $id): void
+    {
+        $st = $this->pdo->prepare("DELETE FROM alert_profiles WHERE id = :id");
+        $st->execute([':id' => $id]);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

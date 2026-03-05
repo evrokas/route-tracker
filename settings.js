@@ -159,7 +159,7 @@ function renderRouteList(routes) {
   box.innerHTML = html;
 }
 
-function showRouteForm(route) {
+async function showRouteForm(route) {
   const wrap = document.getElementById('routeFormWrap');
   if (!wrap) return;
   _addrCache = null;   // reset so fresh addresses are fetched on next picker open
@@ -170,19 +170,26 @@ function showRouteForm(route) {
     schedule: [], advisor_enabled: false, advisor_start_before: 90,
     advisor_buffer_mode: 'auto', advisor_fixed_buffer: 10,
     advisor_stages: ['planning','window','reminder','urgent','last_call'],
-    alert_channels: [], active: true,
+    alert_profile_ids: [], active: true,
   };
 
-  const allChannels  = ['telegram','email','viber','signal'];
   const stageOptions = ['planning','window','reminder','urgent','last_call'];
 
   const schedHtml = (r.schedule || []).map((s, i) => buildSchedRow(s, i)).join('');
 
-  const channelCheckboxes = allChannels.map(ch => `
-    <label class="checkbox-label">
-      <input type="checkbox" name="alert_ch" value="${ch}" ${(r.alert_channels||[]).includes(ch) ? 'checked' : ''}>
-      ${ch}
-    </label>`).join('');
+  // Load alert profiles for assignment checkboxes
+  if (!_allAlertProfiles) {
+    const apd = await apiGet({ action: 'alert_profiles_list' });
+    _allAlertProfiles = apd?.profiles || [];
+  }
+  const assignedIds = Array.isArray(r.alert_profile_ids) ? r.alert_profile_ids : [];
+  const alertProfileCheckboxes = _allAlertProfiles.length
+    ? _allAlertProfiles.map(ap => `
+        <label class="checkbox-label">
+          <input type="checkbox" name="alert_profile_id" value="${escHtml(ap.id)}" ${assignedIds.includes(ap.id) ? 'checked' : ''}>
+          ${escHtml(ap.label)}${ap.enabled ? '' : ' <span style="color:var(--muted)">(disabled)</span>'}
+        </label>`).join('')
+    : '<span style="color:var(--muted);font-size:13px">No alert profiles defined yet. Create one in the Alerts tab.</span>';
 
   const stageCheckboxes = stageOptions.map(st => `
     <label class="checkbox-label">
@@ -271,8 +278,8 @@ function showRouteForm(route) {
       </details>
 
       <div class="field-group">
-        <label>Alert channels</label>
-        <div class="checkbox-row">${channelCheckboxes}</div>
+        <label>Alert Profiles</label>
+        <div class="checkbox-row">${alertProfileCheckboxes}</div>
       </div>
 
       <label class="checkbox-label">
@@ -339,8 +346,8 @@ async function saveRoute(originalId) {
     return;
   }
 
-  const alertChannels = [...document.querySelectorAll('input[name="alert_ch"]:checked')].map(el => el.value);
-  const advisorStages = [...document.querySelectorAll('input[name="adv_stage"]:checked')].map(el => el.value);
+  const alertProfileIds = [...document.querySelectorAll('input[name="alert_profile_id"]:checked')].map(el => el.value);
+  const advisorStages   = [...document.querySelectorAll('input[name="adv_stage"]:checked')].map(el => el.value);
 
   const route = {
     id,
@@ -354,7 +361,7 @@ async function saveRoute(originalId) {
     advisor_buffer_mode:  getVal('rf_adv_mode'),
     advisor_fixed_buffer: parseInt(getVal('rf_adv_fixed')) || 10,
     advisor_stages:       advisorStages,
-    alert_channels:       alertChannels,
+    alert_profile_ids:    alertProfileIds,
     active:               document.getElementById('rf_active')?.checked ? 1 : 0,
   };
 
@@ -371,11 +378,14 @@ function cancelRouteForm() {
   const wrap = document.getElementById('routeFormWrap');
   if (wrap) { wrap.style.display = 'none'; wrap.innerHTML = ''; }
   closeAllAddrDropdowns();
+  _allAlertProfiles = null; // force reload next time form opens
 }
 
 // ─── Address picker helpers ───────────────────────────────────────────────────
 
-let _addrCache = null;  // fetched once per form open
+let _addrCache = null;          // fetched once per form open
+let _allChannelProfiles = null;  // { telegram: [], email: [], signal: [], viber: [] }
+let _allAlertProfiles   = null;  // [...]
 
 async function _fetchAddresses() {
   if (_addrCache !== null) return _addrCache;
@@ -452,76 +462,456 @@ async function deleteRoute(id, label) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Alerts tab
+// Alerts tab — profile-based system
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function loadAlerts() {
+  // Load thresholds
   const data = await apiGet({ action: 'get_settings' });
-  if (!data) return;
-  const s = data.settings || {};
+  if (data) {
+    const s = data.settings || {};
+    setVal('alert_traffic_threshold', s.alert_traffic_threshold || '30');
+    setVal('alert_min_samples',       s.alert_min_samples       || '5');
+    setVal('alert_max_per_day',       s.alert_max_per_day       || '3');
+  }
 
-  setVal('alert_traffic_threshold', s.alert_traffic_threshold || '30');
-  setVal('alert_min_samples',       s.alert_min_samples       || '5');
-  setVal('alert_max_per_day',       s.alert_max_per_day       || '3');
+  // Load channel profiles
+  const cpData = await apiGet({ action: 'channel_profiles_list' });
+  _allChannelProfiles = cpData?.profiles || { telegram: [], email: [], signal: [], viber: [] };
+  ['telegram','email','signal','viber'].forEach(t => renderChannelProfileTable(t, _allChannelProfiles[t] || []));
 
-  const channels = ['telegram','email','viber','signal'];
-  channels.forEach(ch => {
-    const enabled = s[`${ch}_enabled`] === '1';
-    setCheck(`${ch}_enabled`, enabled);
-    toggleChannel(ch, enabled);
-  });
-
-  setVal('telegram_bot_token',   s.telegram_bot_token   || '');
-  setVal('telegram_chat_ids',    s.telegram_chat_ids    || '');
-  setVal('email_host',           s.email_host           || '');
-  setVal('email_port',           s.email_port           || '587');
-  setVal('email_user',           s.email_user           || '');
-  setVal('email_pass',           s.email_pass           || '');
-  setVal('email_from',           s.email_from           || '');
-  setVal('email_to',             s.email_to             || '');
-  setVal('viber_auth_token',     s.viber_auth_token     || '');
-  setVal('viber_receiver_ids',   s.viber_receiver_ids   || '');
-  setVal('signal_api_url',       s.signal_api_url       || '');
-  setVal('signal_sender',        s.signal_sender        || '');
-  setVal('signal_recipients',    s.signal_recipients    || '');
+  // Load alert profiles
+  const apData = await apiGet({ action: 'alert_profiles_list' });
+  _allAlertProfiles = apData?.profiles || [];
+  renderAlertProfileTable(_allAlertProfiles);
 }
 
-function toggleChannel(channel, enabled) {
-  const fields = document.getElementById(`fields-${channel}`);
-  if (fields) fields.style.display = enabled ? '' : 'none';
-}
-
-async function saveAlerts() {
+async function saveAlertThresholds() {
   const settings = {
     alert_traffic_threshold: getVal('alert_traffic_threshold'),
     alert_min_samples:       getVal('alert_min_samples'),
     alert_max_per_day:       getVal('alert_max_per_day'),
-    telegram_enabled:        getCheck('telegram_enabled') ? '1' : '0',
-    telegram_bot_token:      getVal('telegram_bot_token'),
-    telegram_chat_ids:       getVal('telegram_chat_ids'),
-    email_enabled:           getCheck('email_enabled') ? '1' : '0',
-    email_host:              getVal('email_host'),
-    email_port:              getVal('email_port'),
-    email_user:              getVal('email_user'),
-    email_pass:              getVal('email_pass'),
-    email_from:              getVal('email_from'),
-    email_to:                getVal('email_to'),
-    viber_enabled:           getCheck('viber_enabled') ? '1' : '0',
-    viber_auth_token:        getVal('viber_auth_token'),
-    viber_receiver_ids:      getVal('viber_receiver_ids'),
-    signal_enabled:          getCheck('signal_enabled') ? '1' : '0',
-    signal_api_url:          getVal('signal_api_url'),
-    signal_sender:           getVal('signal_sender'),
-    signal_recipients:       getVal('signal_recipients'),
   };
-
   const result = await apiPost('save_setting', { settings });
   showStatus('alertStatus', result?.ok ? 'Saved!' : ('Error: ' + (result?.error || '?')), result?.ok);
 }
 
-async function testChannel(channel) {
-  const result = await apiPost('test_alert', { channel });
-  alert(result?.ok ? `✓ ${result.message}` : `✗ ${result?.message || 'Failed'}`);
+// ─── Channel Profiles ─────────────────────────────────────────────────────
+
+function renderChannelProfileTable(type, profiles) {
+  const box = document.getElementById(`cpTable-${type}`);
+  if (!box) return;
+  if (!profiles.length) {
+    box.innerHTML = '<div class="cp-empty">No profiles yet.</div>';
+    return;
+  }
+  let html = '<table class="cp-table"><thead><tr><th>Label</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>';
+  for (const p of profiles) {
+    html += `<tr>
+      <td>${escHtml(p.label)}</td>
+      <td>${p.enabled ? 'Yes' : 'No'}</td>
+      <td>
+        <button class="btn-tiny" onclick="editChannelProfile('${type}', '${escHtml(p.id)}')">Edit</button>
+        <button class="btn-tiny" onclick="testChannelProfile('${type}', '${escHtml(p.id)}', '${escHtml(p.label)}')">Test</button>
+        <button class="btn-tiny btn-danger" onclick="deleteChannelProfile('${type}', '${escHtml(p.id)}', '${escHtml(p.label)}')">Delete</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  box.innerHTML = html;
+}
+
+function addChannelProfile(type) {
+  showChannelProfileForm(type, null);
+}
+
+async function editChannelProfile(type, id) {
+  // Find profile from cache
+  const profile = (_allChannelProfiles?.[type] || []).find(p => p.id === id);
+  showChannelProfileForm(type, profile || null);
+}
+
+function showChannelProfileForm(type, profile) {
+  // Hide all other forms
+  ['telegram','email','signal','viber'].forEach(t => {
+    if (t !== type) {
+      const f = document.getElementById(`cpForm-${t}`);
+      if (f) { f.style.display = 'none'; f.innerHTML = ''; }
+    }
+  });
+
+  const box = document.getElementById(`cpForm-${type}`);
+  if (!box) return;
+  box.style.display = 'block';
+
+  const p = profile || { id: '', label: '', enabled: true };
+  const originalId = profile?.id || '';
+
+  let typeFields = '';
+  if (type === 'telegram') {
+    typeFields = `
+      <div class="field-group">
+        <label>Bot Token</label>
+        <input type="password" id="cpf_bot_token" value="${escHtml(p.bot_token || '')}" placeholder="123456789:ABCdef...">
+      </div>
+      <div class="field-group">
+        <label>Chat IDs (comma-separated)</label>
+        <input type="text" id="cpf_chat_ids" value="${escHtml(p.chat_ids || '')}" placeholder="-1001234567890, 987654321">
+      </div>`;
+  } else if (type === 'email') {
+    typeFields = `
+      <div class="field-row-2">
+        <div class="field-group">
+          <label>SMTP Host</label>
+          <input type="text" id="cpf_smtp_host" value="${escHtml(p.smtp_host || '')}" placeholder="smtp.gmail.com">
+        </div>
+        <div class="field-group">
+          <label>Port</label>
+          <input type="number" id="cpf_smtp_port" value="${p.smtp_port || 587}" min="1" max="65535">
+        </div>
+      </div>
+      <div class="field-group">
+        <label>Encryption</label>
+        <select id="cpf_smtp_encryption">
+          <option value="tls" ${p.smtp_encryption==='tls'?'selected':''}>TLS (STARTTLS)</option>
+          <option value="ssl" ${p.smtp_encryption==='ssl'?'selected':''}>SSL</option>
+          <option value="none" ${p.smtp_encryption==='none'?'selected':''}>None</option>
+        </select>
+      </div>
+      <div class="field-row-2">
+        <div class="field-group">
+          <label>SMTP User</label>
+          <input type="text" id="cpf_smtp_user" value="${escHtml(p.smtp_user || '')}" placeholder="user@example.com">
+        </div>
+        <div class="field-group">
+          <label>SMTP Password</label>
+          <input type="password" id="cpf_smtp_pass" value="${escHtml(p.smtp_pass || '')}">
+        </div>
+      </div>
+      <div class="field-row-2">
+        <div class="field-group">
+          <label>From Address</label>
+          <input type="text" id="cpf_from_address" value="${escHtml(p.from_address || '')}" placeholder="noreply@example.com">
+        </div>
+        <div class="field-group">
+          <label>From Name</label>
+          <input type="text" id="cpf_from_name" value="${escHtml(p.from_name || 'Route Tracker')}">
+        </div>
+      </div>
+      <div class="field-group">
+        <label>Recipients (comma-separated)</label>
+        <input type="text" id="cpf_recipients" value="${escHtml(p.recipients || '')}" placeholder="you@example.com, other@example.com">
+      </div>`;
+  } else if (type === 'signal') {
+    typeFields = `
+      <div class="field-group">
+        <label>Signal CLI / API URL</label>
+        <input type="text" id="cpf_api_url" value="${escHtml(p.api_url || '')}" placeholder="http://localhost:8080">
+      </div>
+      <div class="field-group">
+        <label>Sender Number</label>
+        <input type="text" id="cpf_sender_number" value="${escHtml(p.sender_number || '')}" placeholder="+30xxxxxxxxxx">
+      </div>
+      <div class="field-group">
+        <label>Recipient Numbers (comma-separated)</label>
+        <input type="text" id="cpf_recipient_numbers" value="${escHtml(p.recipient_numbers || '')}" placeholder="+30xxxxxxxxxx, +30yyyyyyyyyy">
+      </div>`;
+  } else if (type === 'viber') {
+    typeFields = `
+      <div class="field-group">
+        <label>Auth Token</label>
+        <input type="password" id="cpf_auth_token" value="${escHtml(p.auth_token || '')}" placeholder="Viber bot auth token">
+      </div>
+      <div class="field-group">
+        <label>Receiver IDs (comma-separated)</label>
+        <input type="text" id="cpf_receiver_ids" value="${escHtml(p.receiver_ids || '')}" placeholder="user_viber_id_1, user_viber_id_2">
+      </div>`;
+  }
+
+  box.innerHTML = `
+    <div class="cp-form">
+      <div class="field-row-2">
+        <div class="field-group">
+          <label>Profile ID (slug)</label>
+          <input type="text" id="cpf_id" value="${escHtml(p.id)}" placeholder="my_telegram" ${profile ? 'readonly' : ''}>
+        </div>
+        <div class="field-group">
+          <label>Label</label>
+          <input type="text" id="cpf_label" value="${escHtml(p.label)}" placeholder="Personal Telegram">
+        </div>
+      </div>
+      ${typeFields}
+      <label class="checkbox-label" style="margin-top:8px">
+        <input type="checkbox" id="cpf_enabled" ${p.enabled ? 'checked' : ''}> Enabled
+      </label>
+      <div class="form-actions" style="margin-top:12px">
+        <button class="btn-primary" onclick="saveChannelProfile('${type}', '${escHtml(originalId)}')">Save</button>
+        <button class="btn-secondary" onclick="cancelChannelProfileForm('${type}')">Cancel</button>
+        <span id="cpFormStatus-${type}" class="save-status"></span>
+      </div>
+    </div>`;
+
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function cancelChannelProfileForm(type) {
+  const box = document.getElementById(`cpForm-${type}`);
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+async function saveChannelProfile(type, originalId) {
+  const id    = getVal('cpf_id').trim();
+  const label = getVal('cpf_label').trim();
+  if (!id || !label) {
+    showStatus(`cpFormStatus-${type}`, 'ID and Label are required', false);
+    return;
+  }
+
+  const data = { id, label, type, original_id: originalId, enabled: document.getElementById('cpf_enabled')?.checked ? 1 : 0 };
+
+  if (type === 'telegram') {
+    data.bot_token = getVal('cpf_bot_token');
+    data.chat_ids  = getVal('cpf_chat_ids');
+  } else if (type === 'email') {
+    data.smtp_host       = getVal('cpf_smtp_host');
+    data.smtp_port       = parseInt(getVal('cpf_smtp_port')) || 587;
+    data.smtp_encryption = getVal('cpf_smtp_encryption');
+    data.smtp_user       = getVal('cpf_smtp_user');
+    data.smtp_pass       = getVal('cpf_smtp_pass');
+    data.from_address    = getVal('cpf_from_address');
+    data.from_name       = getVal('cpf_from_name');
+    data.recipients      = getVal('cpf_recipients');
+  } else if (type === 'signal') {
+    data.api_url          = getVal('cpf_api_url');
+    data.sender_number    = getVal('cpf_sender_number');
+    data.recipient_numbers = getVal('cpf_recipient_numbers');
+  } else if (type === 'viber') {
+    data.auth_token   = getVal('cpf_auth_token');
+    data.receiver_ids = getVal('cpf_receiver_ids');
+  }
+
+  const result = await apiPost('channel_profiles_save', data);
+  if (result?.ok) {
+    showStatus(`cpFormStatus-${type}`, 'Saved!', true);
+    _allChannelProfiles = null; // invalidate cache
+    _allAlertProfiles   = null;
+    setTimeout(async () => {
+      cancelChannelProfileForm(type);
+      const cpd = await apiGet({ action: 'channel_profiles_list' });
+      _allChannelProfiles = cpd?.profiles || { telegram: [], email: [], signal: [], viber: [] };
+      renderChannelProfileTable(type, _allChannelProfiles[type] || []);
+    }, 600);
+  } else {
+    showStatus(`cpFormStatus-${type}`, 'Error: ' + (result?.error || '?'), false);
+  }
+}
+
+async function deleteChannelProfile(type, id, label) {
+  if (!confirm(`Delete "${label}" (${type})?\nIt must not be used in any alert profile.`)) return;
+  const result = await apiPost('channel_profiles_delete', { type, id });
+  if (result?.ok) {
+    _allChannelProfiles = null;
+    const cpd = await apiGet({ action: 'channel_profiles_list' });
+    _allChannelProfiles = cpd?.profiles || { telegram: [], email: [], signal: [], viber: [] };
+    renderChannelProfileTable(type, _allChannelProfiles[type] || []);
+  } else {
+    alert('Error: ' + (result?.error || 'Delete failed'));
+  }
+}
+
+async function testChannelProfile(type, id, label) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  const result = await apiPost('channel_profiles_test', { type, id });
+  btn.disabled = false;
+  btn.textContent = 'Test';
+  alert(result?.ok ? `Sent to "${label}" successfully.` : `Failed: ${result?.error || result?.message || 'unknown error'}`);
+}
+
+// ─── Alert Profiles ───────────────────────────────────────────────────────
+
+function renderAlertProfileTable(profiles) {
+  const box = document.getElementById('alertProfilesTable');
+  if (!box) return;
+  if (!profiles.length) {
+    box.innerHTML = '<div class="cp-empty">No alert profiles yet. Click "+ Add Profile" to create one.</div>';
+    return;
+  }
+  let html = '<table class="cp-table"><thead><tr><th>Label</th><th>Channels</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>';
+  for (const ap of profiles) {
+    const channels = (ap.channels || []).map(b => `${b.type}:${b.profile_id}`).join(', ') || '—';
+    html += `<tr>
+      <td>${escHtml(ap.label)}</td>
+      <td style="font-size:12px;color:var(--muted)">${escHtml(channels)}</td>
+      <td>${ap.enabled ? 'Yes' : 'No'}</td>
+      <td>
+        <button class="btn-tiny" onclick="editAlertProfile('${escHtml(ap.id)}')">Edit</button>
+        <button class="btn-tiny" onclick="testAlertProfile('${escHtml(ap.id)}', '${escHtml(ap.label)}')">Test</button>
+        <button class="btn-tiny btn-danger" onclick="deleteAlertProfile('${escHtml(ap.id)}', '${escHtml(ap.label)}')">Delete</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  box.innerHTML = html;
+}
+
+function addAlertProfile() {
+  showAlertProfileForm(null);
+}
+
+async function editAlertProfile(id) {
+  const profile = (_allAlertProfiles || []).find(ap => ap.id === id);
+  showAlertProfileForm(profile || null);
+}
+
+function showAlertProfileForm(profile) {
+  const box = document.getElementById('alertProfileForm');
+  if (!box) return;
+  box.style.display = 'block';
+
+  const ap = profile || { id: '', label: '', channels: [], enabled: true };
+  const originalId = profile?.id || '';
+
+  // Build available channel profile options grouped by type
+  const cpGroups = _allChannelProfiles || { telegram: [], email: [], signal: [], viber: [] };
+
+  const bindingsHtml = (ap.channels || []).map((b, i) => buildBindingRow(cpGroups, i, b.type, b.profile_id)).join('');
+
+  box.innerHTML = `
+    <div class="cp-form">
+      <div class="field-row-2">
+        <div class="field-group">
+          <label>Profile ID (slug)</label>
+          <input type="text" id="apf_id" value="${escHtml(ap.id)}" placeholder="my_alerts" ${profile ? 'readonly' : ''}>
+        </div>
+        <div class="field-group">
+          <label>Label</label>
+          <input type="text" id="apf_label" value="${escHtml(ap.label)}" placeholder="Work Alerts">
+        </div>
+      </div>
+      <div class="field-group">
+        <label>Channel Bindings</label>
+        <div id="apf_bindings">${bindingsHtml}</div>
+        <button class="btn-tiny" onclick="addBindingRow()" style="margin-top:6px">+ Add Channel</button>
+      </div>
+      <label class="checkbox-label" style="margin-top:8px">
+        <input type="checkbox" id="apf_enabled" ${ap.enabled ? 'checked' : ''}> Enabled
+      </label>
+      <div class="form-actions" style="margin-top:12px">
+        <button class="btn-primary" onclick="saveAlertProfile('${escHtml(originalId)}')">Save</button>
+        <button class="btn-secondary" onclick="cancelAlertProfileForm()">Cancel</button>
+        <span id="apfStatus" class="save-status"></span>
+      </div>
+    </div>`;
+
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function buildBindingRow(cpGroups, idx, selectedType, selectedProfileId) {
+  const types = ['telegram','email','signal','viber'];
+  const typeOpts = types.map(t => `<option value="${t}" ${t === selectedType ? 'selected' : ''}>${t}</option>`).join('');
+
+  const profileOpts = buildProfileOpts(cpGroups, selectedType, selectedProfileId);
+
+  return `<div class="binding-row" data-idx="${idx}">
+    <select class="binding-type" onchange="onBindingTypeChange(this)">
+      ${typeOpts}
+    </select>
+    <select class="binding-profile">${profileOpts}</select>
+    <button class="btn-tiny btn-danger" onclick="this.closest('.binding-row').remove()">−</button>
+  </div>`;
+}
+
+function buildProfileOpts(cpGroups, type, selectedId) {
+  const profiles = (cpGroups && cpGroups[type]) || [];
+  if (!profiles.length) return '<option value="">(no profiles)</option>';
+  return profiles.map(p => `<option value="${escHtml(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${escHtml(p.label)}</option>`).join('');
+}
+
+function onBindingTypeChange(typeSelect) {
+  const row = typeSelect.closest('.binding-row');
+  const profileSel = row?.querySelector('.binding-profile');
+  if (!profileSel) return;
+  const type = typeSelect.value;
+  profileSel.innerHTML = buildProfileOpts(_allChannelProfiles || {}, type, '');
+}
+
+function addBindingRow() {
+  const container = document.getElementById('apf_bindings');
+  if (!container) return;
+  const idx = container.querySelectorAll('.binding-row').length;
+  container.insertAdjacentHTML('beforeend', buildBindingRow(_allChannelProfiles || {}, idx, 'telegram', ''));
+}
+
+function getBindingsFromForm() {
+  const rows = document.querySelectorAll('#apf_bindings .binding-row');
+  const bindings = [];
+  rows.forEach(row => {
+    const type      = row.querySelector('.binding-type')?.value;
+    const profileId = row.querySelector('.binding-profile')?.value;
+    if (type && profileId) bindings.push({ type, profile_id: profileId });
+  });
+  return bindings;
+}
+
+function cancelAlertProfileForm() {
+  const box = document.getElementById('alertProfileForm');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+async function saveAlertProfile(originalId) {
+  const id    = getVal('apf_id').trim();
+  const label = getVal('apf_label').trim();
+  if (!id || !label) {
+    showStatus('apfStatus', 'ID and Label are required', false);
+    return;
+  }
+
+  const data = {
+    id,
+    label,
+    original_id: originalId,
+    channels:    getBindingsFromForm(),
+    enabled:     document.getElementById('apf_enabled')?.checked ? 1 : 0,
+  };
+
+  const result = await apiPost('alert_profiles_save', data);
+  if (result?.ok) {
+    showStatus('apfStatus', 'Saved!', true);
+    _allAlertProfiles = null;
+    setTimeout(async () => {
+      cancelAlertProfileForm();
+      const apd = await apiGet({ action: 'alert_profiles_list' });
+      _allAlertProfiles = apd?.profiles || [];
+      renderAlertProfileTable(_allAlertProfiles);
+    }, 600);
+  } else {
+    showStatus('apfStatus', 'Error: ' + (result?.error || '?'), false);
+  }
+}
+
+async function deleteAlertProfile(id, label) {
+  if (!confirm(`Delete alert profile "${label}"?\nIt must not be assigned to any route.`)) return;
+  const result = await apiPost('alert_profiles_delete', { id });
+  if (result?.ok) {
+    _allAlertProfiles = null;
+    const apd = await apiGet({ action: 'alert_profiles_list' });
+    _allAlertProfiles = apd?.profiles || [];
+    renderAlertProfileTable(_allAlertProfiles);
+  } else {
+    alert('Error: ' + (result?.error || 'Delete failed'));
+  }
+}
+
+async function testAlertProfile(id, label) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  const result = await apiPost('alert_profiles_test', { id });
+  btn.disabled = false;
+  btn.textContent = 'Test';
+  alert(result?.ok ? `Test sent via "${label}" successfully.` : `Failed: ${result?.error || result?.message || 'unknown error'}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -618,7 +1008,7 @@ async function importConfig() {
     return;
   }
 
-  const result = await apiPost({ action: 'import_config' }, backup);
+  const result = await apiPost('import_config', backup);
 
   if (result?.ok) {
     if (statusEl) {

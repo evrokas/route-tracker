@@ -148,6 +148,7 @@ $currentTz = $config->getTimezone();
 </template>
 
 <template id="tplAlerts">
+  <!-- Global Thresholds -->
   <div class="settings-section">
     <div class="section-title">Global Thresholds</div>
     <div class="field-row-3">
@@ -165,127 +166,67 @@ $currentTz = $config->getTimezone();
         <input type="number" id="alert_max_per_day" min="1" max="20">
       </div>
     </div>
-  </div>
-
-  <div class="settings-section channel-card" id="card-telegram">
-    <div class="channel-header">
-      <span class="channel-icon">✈️</span>
-      <span class="channel-name">Telegram</span>
-      <label class="toggle-label">
-        <input type="checkbox" id="telegram_enabled" onchange="toggleChannel('telegram', this.checked)">
-        <span class="toggle"></span>
-      </label>
-    </div>
-    <div class="channel-fields" id="fields-telegram">
-      <div class="field-group">
-        <label>Bot Token</label>
-        <input type="password" id="telegram_bot_token" placeholder="123456:ABC…" autocomplete="off">
-      </div>
-      <div class="field-group">
-        <label>Chat IDs (comma-separated)</label>
-        <input type="text" id="telegram_chat_ids" placeholder="-1001234567890, 987654321">
-      </div>
-      <button class="btn-secondary" onclick="testChannel('telegram')">Test Telegram</button>
+    <div class="settings-footer" style="margin-top:12px;padding-top:0;border:none">
+      <button class="btn-primary" onclick="saveAlertThresholds()">Save Thresholds</button>
+      <span id="alertStatus" class="save-status"></span>
     </div>
   </div>
 
-  <div class="settings-section channel-card" id="card-email">
-    <div class="channel-header">
-      <span class="channel-icon">📧</span>
-      <span class="channel-name">Email (SMTP)</span>
-      <label class="toggle-label">
-        <input type="checkbox" id="email_enabled" onchange="toggleChannel('email', this.checked)">
-        <span class="toggle"></span>
-      </label>
+  <!-- Channel Profiles -->
+  <div class="settings-section">
+    <div class="section-title">Channel Profiles</div>
+    <div class="field-hint" style="margin-bottom:16px">
+      Named, reusable credentials for each messaging channel. Routes send alerts via Alert Profiles, which bundle one or more channel profiles.
     </div>
-    <div class="channel-fields" id="fields-email">
-      <div class="field-row-2">
-        <div class="field-group">
-          <label>SMTP Host</label>
-          <input type="text" id="email_host" placeholder="smtp.gmail.com">
-        </div>
-        <div class="field-group">
-          <label>Port</label>
-          <input type="number" id="email_port" value="587">
-        </div>
+
+    <div class="channel-profiles-block">
+      <div class="cp-type-header">
+        <span>✈️ Telegram</span>
+        <button class="btn-tiny" onclick="addChannelProfile('telegram')">+ Add</button>
       </div>
-      <div class="field-row-2">
-        <div class="field-group">
-          <label>Username</label>
-          <input type="text" id="email_user" placeholder="you@gmail.com">
-        </div>
-        <div class="field-group">
-          <label>Password</label>
-          <input type="password" id="email_pass" autocomplete="off">
-        </div>
+      <div id="cpTable-telegram"></div>
+      <div id="cpForm-telegram" style="display:none"></div>
+    </div>
+
+    <div class="channel-profiles-block">
+      <div class="cp-type-header">
+        <span>📧 Email (SMTP)</span>
+        <button class="btn-tiny" onclick="addChannelProfile('email')">+ Add</button>
       </div>
-      <div class="field-row-2">
-        <div class="field-group">
-          <label>From Address</label>
-          <input type="email" id="email_from" placeholder="tracker@yourdomain.com">
-        </div>
-        <div class="field-group">
-          <label>To Address(es) (comma-separated)</label>
-          <input type="text" id="email_to" placeholder="you@gmail.com">
-        </div>
+      <div id="cpTable-email"></div>
+      <div id="cpForm-email" style="display:none"></div>
+    </div>
+
+    <div class="channel-profiles-block">
+      <div class="cp-type-header">
+        <span>🔐 Signal</span>
+        <button class="btn-tiny" onclick="addChannelProfile('signal')">+ Add</button>
       </div>
-      <button class="btn-secondary" onclick="testChannel('email')">Test Email</button>
+      <div id="cpTable-signal"></div>
+      <div id="cpForm-signal" style="display:none"></div>
+    </div>
+
+    <div class="channel-profiles-block">
+      <div class="cp-type-header">
+        <span>💬 Viber</span>
+        <button class="btn-tiny" onclick="addChannelProfile('viber')">+ Add</button>
+      </div>
+      <div id="cpTable-viber"></div>
+      <div id="cpForm-viber" style="display:none"></div>
     </div>
   </div>
 
-  <div class="settings-section channel-card" id="card-viber">
-    <div class="channel-header">
-      <span class="channel-icon">💬</span>
-      <span class="channel-name">Viber</span>
-      <label class="toggle-label">
-        <input type="checkbox" id="viber_enabled" onchange="toggleChannel('viber', this.checked)">
-        <span class="toggle"></span>
-      </label>
+  <!-- Alert Profiles -->
+  <div class="settings-section">
+    <div class="section-title-row">
+      <span class="section-title">Alert Profiles</span>
+      <button class="btn-primary" onclick="addAlertProfile()">+ Add Profile</button>
     </div>
-    <div class="channel-fields" id="fields-viber">
-      <div class="field-group">
-        <label>Auth Token</label>
-        <input type="password" id="viber_auth_token" autocomplete="off">
-      </div>
-      <div class="field-group">
-        <label>Receiver IDs (comma-separated)</label>
-        <input type="text" id="viber_receiver_ids">
-      </div>
-      <button class="btn-secondary" onclick="testChannel('viber')">Test Viber</button>
+    <div class="field-hint" style="margin-bottom:12px">
+      Bundle multiple channel profiles. Routes are assigned to alert profiles, not individual channels.
     </div>
-  </div>
-
-  <div class="settings-section channel-card" id="card-signal">
-    <div class="channel-header">
-      <span class="channel-icon">🔐</span>
-      <span class="channel-name">Signal</span>
-      <label class="toggle-label">
-        <input type="checkbox" id="signal_enabled" onchange="toggleChannel('signal', this.checked)">
-        <span class="toggle"></span>
-      </label>
-    </div>
-    <div class="channel-fields" id="fields-signal">
-      <div class="field-group">
-        <label>signal-cli-rest-api URL</label>
-        <input type="text" id="signal_api_url" placeholder="http://localhost:8080">
-      </div>
-      <div class="field-row-2">
-        <div class="field-group">
-          <label>Sender Number</label>
-          <input type="text" id="signal_sender" placeholder="+1234567890">
-        </div>
-        <div class="field-group">
-          <label>Recipients (comma-separated)</label>
-          <input type="text" id="signal_recipients" placeholder="+1234567890">
-        </div>
-      </div>
-      <button class="btn-secondary" onclick="testChannel('signal')">Test Signal</button>
-    </div>
-  </div>
-
-  <div class="settings-footer">
-    <button class="btn-primary" onclick="saveAlerts()">Save Alert Settings</button>
-    <span id="alertStatus" class="save-status"></span>
+    <div id="alertProfilesTable"></div>
+    <div id="alertProfileForm" style="display:none"></div>
   </div>
 </template>
 

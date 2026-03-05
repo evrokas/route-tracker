@@ -2,8 +2,10 @@
 
 /**
  * AlertManager.php — Route Tracker v3
- * Multi-channel alert sending (Email, Telegram, Viber, Signal).
- * Configuration read from DB via Config (no YAML dependency).
+ * Multi-channel alert sending via named channel profiles and alert profiles.
+ *
+ * Alert flow:
+ *   route → alert_profile_ids[] → alert_profiles.channels[] → channel_profiles → send
  */
 
 class AlertManager
@@ -23,17 +25,6 @@ class AlertManager
     // Main evaluation entry point
     // ──────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Evaluate traffic and send alerts if thresholds are exceeded.
-     *
-     * @param array      $route           Route definition
-     * @param array      $schedEntry      Schedule entry (_schedule_mode, _scheduled_time)
-     * @param int        $currentDuration Current primary route duration in seconds
-     * @param int|null   $avgDuration     Historical average in seconds (null = not enough data)
-     * @param array      $currentRoute    Primary route data (summary, distance_text, etc.)
-     * @param array|null $bestAltRoute    Best alternative route data (or null)
-     * @param int|null   $bestAltDuration Best alternative duration in seconds
-     */
     public function evaluateAndAlert(
         array  $route,
         array  $schedEntry,
@@ -44,9 +35,9 @@ class AlertManager
         ?int   $bestAltDuration = null
     ): void {
         $settings = $this->config->getAlertSettings();
-        $channels = $this->config->getRouteAlertChannels($route);
+        $profiles = $this->config->getRouteAlertProfiles($route);
 
-        if (empty($channels)) {
+        if (empty($profiles)) {
             return;
         }
 
@@ -61,7 +52,9 @@ class AlertManager
                 $msg = $this->buildHeavyTrafficMessage(
                     $route, $schedEntry, $currentDuration, $avgDuration, $pct
                 );
-                $this->dispatch($channels, "🚗🔴 Heavy Traffic Alert", $msg, $route);
+                foreach ($profiles as $profile) {
+                    $this->dispatchProfile($profile, "🚗🔴 Heavy Traffic Alert", $msg, $route);
+                }
                 $this->incrementAlertCount($route['id']);
             }
         }
@@ -77,7 +70,9 @@ class AlertManager
                     $route, $schedEntry, $currentDuration, $currentRoute,
                     $bestAltDuration, $bestAltRoute
                 );
-                $this->dispatch($channels, "🚗💡 Better Route Found", $msg, $route);
+                foreach ($profiles as $profile) {
+                    $this->dispatchProfile($profile, "🚗💡 Better Route Found", $msg, $route);
+                }
                 $this->incrementAlertCount($route['id']);
             }
         }
@@ -88,8 +83,8 @@ class AlertManager
      */
     public function sendErrorAlert(array $route, string $errorMessage): void
     {
-        $channels = $this->config->getRouteAlertChannels($route);
-        if (empty($channels)) {
+        $profiles = $this->config->getRouteAlertProfiles($route);
+        if (empty($profiles)) {
             return;
         }
 
@@ -98,23 +93,27 @@ class AlertManager
                "Error: {$errorMessage}\n" .
                "Time: " . date('Y-m-d H:i:s');
 
-        $this->dispatch($channels, "⚠️ Route Tracker Error", $msg, $route);
+        foreach ($profiles as $profile) {
+            $this->dispatchProfile($profile, "⚠️ Route Tracker Error", $msg, $route);
+        }
     }
 
     /**
-     * Send a raw message to a specific route's channels (used by advisor).
+     * Send a raw message to a specific route's alert profiles (used by advisor).
      */
     public function sendToRoute(array $route, string $subject, string $body): void
     {
-        $channels = $this->config->getRouteAlertChannels($route);
-        if (empty($channels)) {
+        $profiles = $this->config->getRouteAlertProfiles($route);
+        if (empty($profiles)) {
             return;
         }
-        $this->dispatch($channels, $subject, $body, $route);
+        foreach ($profiles as $profile) {
+            $this->dispatchProfile($profile, $subject, $body, $route);
+        }
     }
 
     /**
-     * Send test message to all enabled channels for a route (or all routes).
+     * Send test message via all profiles for a route (or all routes).
      */
     public function sendTest(?string $routeId = null): void
     {
@@ -123,49 +122,88 @@ class AlertManager
             : $this->config->getAllActiveRoutes();
 
         foreach ($routes as $route) {
-            $channels = $this->config->getRouteAlertChannels($route);
-            if (empty($channels)) {
-                echo "  Route {$route['id']}: no enabled alert channels\n";
+            $profiles = $this->config->getRouteAlertProfiles($route);
+            if (empty($profiles)) {
+                echo "  Route {$route['id']}: no enabled alert profiles assigned\n";
                 continue;
             }
+
             $msg = "🧪 Test Alert\n\n" .
                    "Route: {$route['label']}\n" .
-                   "Channels: " . implode(', ', $channels) . "\n" .
+                   "Profiles: " . implode(', ', array_column($profiles, 'id')) . "\n" .
                    "Time: " . date('Y-m-d H:i:s') . "\n\n" .
                    "If you receive this, alerts are working correctly.";
 
-            echo "  Sending test to [" . implode(', ', $channels) . "] for: {$route['label']}\n";
-            $this->dispatch($channels, "🧪 Route Tracker Test", $msg, $route);
+            foreach ($profiles as $profile) {
+                echo "  Dispatching via profile '{$profile['id']}' for route: {$route['label']}\n";
+                $this->dispatchProfile($profile, "🧪 Route Tracker Test", $msg, $route);
+            }
         }
     }
 
     /**
-     * Send a test message on a specific channel (for Settings → Alerts tab).
+     * Send test message via all channels in one alert profile.
      * Returns ['ok' => bool, 'message' => string].
      */
-    public function sendTestChannel(string $channel): array
+    public function sendTestAlertProfile(string $profileId): array
     {
-        $cfg = $this->config->getAlertConfig($channel);
-        if (empty($cfg['enabled'])) {
-            return ['ok' => false, 'message' => "Channel '{$channel}' is not enabled."];
+        $profile = $this->config->getAlertProfile($profileId);
+        if (!$profile) {
+            return ['ok' => false, 'message' => "Alert profile '{$profileId}' not found or disabled."];
         }
 
-        $body = "🧪 Route Tracker — Test Alert\n\n" .
-                "Channel: {$channel}\n" .
+        $msg = "🧪 Route Tracker — Test Alert\n\n" .
+               "Profile: {$profile['label']}\n" .
+               "Time: " . date('Y-m-d H:i:s') . "\n\n" .
+               "If you see this, the alert profile is configured correctly.";
+
+        try {
+            $this->dispatchProfile(
+                $profile,
+                "🧪 Route Tracker Test",
+                $msg,
+                ['id' => $profileId, 'label' => $profile['label']]
+            );
+            return ['ok' => true, 'message' => 'Test dispatched via all channel bindings.'];
+        } catch (Exception $e) {
+            return ['ok' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Send test message via one specific channel profile.
+     * Returns ['ok' => bool, 'message' => string].
+     */
+    public function sendTestChannelProfile(string $type, string $profileId): array
+    {
+        $cfg = null;
+        switch ($type) {
+            case 'telegram': $cfg = $this->config->getTelegramProfile($profileId); break;
+            case 'email':    $cfg = $this->config->getEmailProfile($profileId);    break;
+            case 'signal':   $cfg = $this->config->getSignalProfile($profileId);   break;
+            case 'viber':    $cfg = $this->config->getViberProfile($profileId);    break;
+            default:
+                return ['ok' => false, 'message' => "Unknown channel type: {$type}"];
+        }
+
+        if (!$cfg) {
+            return ['ok' => false, 'message' => "Profile '{$profileId}' ({$type}) not found or disabled."];
+        }
+
+        $body = "🧪 Route Tracker — Channel Profile Test\n\n" .
+                "Type: {$type}\nProfile: {$profileId}\n" .
                 "Time: " . date('Y-m-d H:i:s') . "\n\n" .
-                "If you see this, {$channel} alerts are configured correctly.";
+                "If you see this, the channel profile is configured correctly.";
 
         try {
             $ok = false;
-            switch ($channel) {
-                case 'telegram': $ok = $this->sendTelegram($body); break;
-                case 'email':    $ok = $this->sendEmail("🧪 Route Tracker Test", $body); break;
-                case 'viber':    $ok = $this->sendViber($body); break;
-                case 'signal':   $ok = $this->sendSignal($body); break;
-                default:
-                    return ['ok' => false, 'message' => "Unknown channel: {$channel}"];
+            switch ($type) {
+                case 'telegram': $ok = $this->sendTelegram($cfg, $body); break;
+                case 'email':    $ok = $this->sendEmail($cfg, "🧪 Route Tracker Test", $body); break;
+                case 'signal':   $ok = $this->sendSignal($cfg, $body); break;
+                case 'viber':    $ok = $this->sendViber($cfg, $body); break;
             }
-            return ['ok' => $ok, 'message' => $ok ? 'Test message sent.' : 'Send failed — check logs.'];
+            return ['ok' => $ok, 'message' => $ok ? 'Test message sent.' : 'Send failed — check alerts.log.'];
         } catch (Exception $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         }
@@ -244,57 +282,138 @@ class AlertManager
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Dispatch to channels
+    // Profile dispatch
     // ──────────────────────────────────────────────────────────────────────────
 
-    private function dispatch(array $channels, string $subject, string $body, array $route): void
+    private function dispatchProfile(array $profile, string $subject, string $body, array $route): void
     {
-        foreach ($channels as $channel) {
+        foreach ($profile['channels'] as $binding) {
+            $type      = $binding['type']       ?? '';
+            $profileId = $binding['profile_id'] ?? '';
+
+            $cfg = null;
+            switch ($type) {
+                case 'telegram': $cfg = $this->config->getTelegramProfile($profileId); break;
+                case 'email':    $cfg = $this->config->getEmailProfile($profileId);    break;
+                case 'signal':   $cfg = $this->config->getSignalProfile($profileId);   break;
+                case 'viber':    $cfg = $this->config->getViberProfile($profileId);    break;
+            }
+
+            if (!$cfg) {
+                $this->log("Alert skip: {$type} profile '{$profileId}' not found or disabled (route={$route['id']})");
+                continue;
+            }
+
             try {
-                switch ($channel) {
-                    case 'email':    $ok = $this->sendEmail($subject, $body); break;
-                    case 'telegram': $ok = $this->sendTelegram($body); break;
-                    case 'viber':    $ok = $this->sendViber($body); break;
-                    case 'signal':   $ok = $this->sendSignal($body); break;
-                    default:         $ok = false;
+                $ok = false;
+                switch ($type) {
+                    case 'telegram': $ok = $this->sendTelegram($cfg, $body); break;
+                    case 'email':    $ok = $this->sendEmail($cfg, $subject, $body); break;
+                    case 'signal':   $ok = $this->sendSignal($cfg, $body); break;
+                    case 'viber':    $ok = $this->sendViber($cfg, $body); break;
                 }
                 $status = $ok ? 'OK' : 'FAIL';
             } catch (Exception $e) {
                 $status = 'ERROR: ' . $e->getMessage();
             }
-            $this->log("Alert [{$channel}] route={$route['id']} status={$status}");
+
+            $this->log("Alert [{$type}:{$profileId}] route={$route['id']} status={$status}");
         }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Email via SMTP
+    // Channel send methods (profile-cfg based)
     // ──────────────────────────────────────────────────────────────────────────
 
-    private function sendEmail(string $subject, string $body): bool
+    private function sendTelegram(array $cfg, string $body): bool
     {
-        $cfg = $this->config->getAlertConfig('email');
-        if (empty($cfg['enabled'])) return false;
+        $token   = $cfg['bot_token'] ?? '';
+        $chatIds = $cfg['chat_ids']  ?? [];
+        if (empty($token) || empty($chatIds)) return false;
 
+        $url = "https://api.telegram.org/bot{$token}/sendMessage";
+        $ok  = true;
+
+        foreach ($chatIds as $chatId) {
+            $payload = json_encode([
+                'chat_id'    => $chatId,
+                'text'       => $body,
+                'parse_mode' => 'HTML',
+            ]);
+            $resp   = $this->httpPost($url, $payload, ['Content-Type: application/json']);
+            $parsed = $resp ? json_decode($resp, true) : null;
+            // Fix: check the actual boolean value of 'ok', not just its existence
+            if (!$parsed || !($parsed['ok'] ?? false)) {
+                $ok = false;
+            }
+        }
+
+        return $ok;
+    }
+
+    private function sendEmail(array $cfg, string $subject, string $body): bool
+    {
         $recipients = $cfg['recipients'] ?? [];
         if (empty($recipients)) return false;
 
-        $method = $cfg['method'] ?? 'smtp';
-        if ($method === 'smtp') {
-            return $this->sendSmtp($cfg, $subject, $body, $recipients);
+        return $this->sendSmtp($cfg, $subject, $body, $recipients);
+    }
+
+    private function sendViber(array $cfg, string $body): bool
+    {
+        $token       = $cfg['auth_token']   ?? '';
+        $receiverIds = $cfg['receiver_ids'] ?? [];
+        if (empty($token) || empty($receiverIds)) return false;
+
+        $url = 'https://chatapi.viber.com/pa/send_message';
+        $ok  = true;
+
+        foreach ($receiverIds as $receiverId) {
+            $payload = json_encode([
+                'receiver' => $receiverId,
+                'type'     => 'text',
+                'text'     => $body,
+            ]);
+            $resp = $this->httpPost($url, $payload, [
+                'Content-Type: application/json',
+                "X-Viber-Auth-Token: {$token}",
+            ]);
+            if (!$resp) {
+                $ok = false;
+            }
         }
 
-        $headers  = "From: {$cfg['from_name']} <{$cfg['from_address']}>\r\n";
-        $headers .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        return mail(implode(', ', $recipients), $subject, $body, $headers);
+        return $ok;
     }
+
+    private function sendSignal(array $cfg, string $body): bool
+    {
+        $apiUrl     = rtrim($cfg['api_url']            ?? 'http://localhost:8080', '/');
+        $sender     = $cfg['sender_number']     ?? '';
+        $recipients = $cfg['recipient_numbers'] ?? [];
+        if (empty($sender) || empty($recipients)) return false;
+
+        $payload = json_encode([
+            'message'    => $body,
+            'number'     => $sender,
+            'recipients' => $recipients,
+        ]);
+
+        $resp = $this->httpPost("{$apiUrl}/v2/send", $payload, ['Content-Type: application/json']);
+        return (bool)$resp;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // SMTP implementation
+    // ──────────────────────────────────────────────────────────────────────────
 
     private function sendSmtp(array $cfg, string $subject, string $body, array $recipients): bool
     {
         $host     = $cfg['smtp_host']       ?? '';
         $port     = (int)($cfg['smtp_port'] ?? 587);
         $enc      = $cfg['smtp_encryption'] ?? 'tls';
-        $user     = $cfg['smtp_username']   ?? '';
-        $pass     = $cfg['smtp_password']   ?? '';
+        $user     = $cfg['smtp_user']       ?? '';
+        $pass     = $cfg['smtp_pass']       ?? '';
         $from     = $cfg['from_address']    ?? $user;
         $fromName = $cfg['from_name']       ?? 'Route Tracker';
 
@@ -355,95 +474,6 @@ class AlertManager
         fclose($sock);
 
         return str_starts_with(trim($resp), '2');
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // Telegram
-    // ──────────────────────────────────────────────────────────────────────────
-
-    private function sendTelegram(string $body): bool
-    {
-        $cfg = $this->config->getAlertConfig('telegram');
-        if (empty($cfg['enabled'])) return false;
-
-        $token   = $cfg['bot_token'] ?? '';
-        $chatIds = $cfg['chat_ids']  ?? [];
-        if (empty($token) || empty($chatIds)) return false;
-
-        $url = "https://api.telegram.org/bot{$token}/sendMessage";
-        $ok  = true;
-
-        foreach ($chatIds as $chatId) {
-            $payload = json_encode([
-                'chat_id'    => $chatId,
-                'text'       => $body,
-                'parse_mode' => 'HTML',
-            ]);
-            $resp = $this->httpPost($url, $payload, ['Content-Type: application/json']);
-            if (!$resp || !isset(json_decode($resp, true)['ok'])) {
-                $ok = false;
-            }
-        }
-
-        return $ok;
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // Viber
-    // ──────────────────────────────────────────────────────────────────────────
-
-    private function sendViber(string $body): bool
-    {
-        $cfg = $this->config->getAlertConfig('viber');
-        if (empty($cfg['enabled'])) return false;
-
-        $token       = $cfg['auth_token']    ?? '';
-        $receiverIds = $cfg['receiver_ids']  ?? [];
-        if (empty($token) || empty($receiverIds)) return false;
-
-        $url = 'https://chatapi.viber.com/pa/send_message';
-        $ok  = true;
-
-        foreach ($receiverIds as $receiverId) {
-            $payload = json_encode([
-                'receiver' => $receiverId,
-                'type'     => 'text',
-                'text'     => $body,
-            ]);
-            $resp = $this->httpPost($url, $payload, [
-                'Content-Type: application/json',
-                "X-Viber-Auth-Token: {$token}",
-            ]);
-            if (!$resp) {
-                $ok = false;
-            }
-        }
-
-        return $ok;
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // Signal
-    // ──────────────────────────────────────────────────────────────────────────
-
-    private function sendSignal(string $body): bool
-    {
-        $cfg = $this->config->getAlertConfig('signal');
-        if (empty($cfg['enabled'])) return false;
-
-        $apiUrl     = rtrim($cfg['api_url'] ?? 'http://localhost:8080', '/');
-        $sender     = $cfg['sender_number']     ?? '';
-        $recipients = $cfg['recipient_numbers'] ?? [];
-        if (empty($sender) || empty($recipients)) return false;
-
-        $payload = json_encode([
-            'message'    => $body,
-            'number'     => $sender,
-            'recipients' => $recipients,
-        ]);
-
-        $resp = $this->httpPost("{$apiUrl}/v2/send", $payload, ['Content-Type: application/json']);
-        return (bool)$resp;
     }
 
     // ──────────────────────────────────────────────────────────────────────────

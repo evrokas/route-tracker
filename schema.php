@@ -3,7 +3,7 @@
 
 /**
  * schema.php — Route Tracker v3
- * Initialize or reset the SQLite database (4 tables).
+ * Initialize or reset the SQLite database.
  *
  * Usage:
  *   php schema.php          # Alias for --init
@@ -52,11 +52,16 @@ if ($reset) {
     $pdo->exec('DROP TABLE IF EXISTS trips;');
     $pdo->exec('DROP TABLE IF EXISTS routes;');
     $pdo->exec('DROP TABLE IF EXISTS settings;');
+    $pdo->exec('DROP TABLE IF EXISTS alert_profiles;');
+    $pdo->exec('DROP TABLE IF EXISTS telegram_profiles;');
+    $pdo->exec('DROP TABLE IF EXISTS email_profiles;');
+    $pdo->exec('DROP TABLE IF EXISTS signal_profiles;');
+    $pdo->exec('DROP TABLE IF EXISTS viber_profiles;');
     echo "Tables dropped.\n\n";
     $init = true;
 }
 
-// ─── Schema ───────────────────────────────────────────────────────────────────
+// ─── Core tables ──────────────────────────────────────────────────────────────
 
 $pdo->exec("
 CREATE TABLE IF NOT EXISTS settings (
@@ -79,7 +84,7 @@ CREATE TABLE IF NOT EXISTS routes (
     advisor_buffer_mode  TEXT    DEFAULT 'auto',
     advisor_fixed_buffer INTEGER DEFAULT 10,
     advisor_stages       TEXT    DEFAULT '[\"planning\",\"window\",\"reminder\",\"urgent\",\"last_call\"]',
-    alert_channels       TEXT    DEFAULT '[]',
+    alert_profile_ids    TEXT    DEFAULT '[]',
     active               INTEGER DEFAULT 1,
     created_at           TEXT,
     updated_at           TEXT
@@ -131,6 +136,89 @@ CREATE TABLE IF NOT EXISTS advisor_state (
 ");
 echo "✓ Table: advisor_state\n";
 
+// ─── Channel profile tables ───────────────────────────────────────────────────
+
+$pdo->exec("
+CREATE TABLE IF NOT EXISTS telegram_profiles (
+    id         TEXT PRIMARY KEY,
+    label      TEXT NOT NULL,
+    bot_token  TEXT NOT NULL DEFAULT '',
+    chat_ids   TEXT NOT NULL DEFAULT '',
+    enabled    INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+);
+");
+echo "✓ Table: telegram_profiles\n";
+
+$pdo->exec("
+CREATE TABLE IF NOT EXISTS email_profiles (
+    id              TEXT PRIMARY KEY,
+    label           TEXT NOT NULL,
+    smtp_host       TEXT NOT NULL DEFAULT '',
+    smtp_port       INTEGER DEFAULT 587,
+    smtp_encryption TEXT DEFAULT 'tls',
+    smtp_user       TEXT NOT NULL DEFAULT '',
+    smtp_pass       TEXT NOT NULL DEFAULT '',
+    from_address    TEXT NOT NULL DEFAULT '',
+    from_name       TEXT DEFAULT 'Route Tracker',
+    recipients      TEXT NOT NULL DEFAULT '',
+    enabled         INTEGER DEFAULT 1,
+    created_at      TEXT,
+    updated_at      TEXT
+);
+");
+echo "✓ Table: email_profiles\n";
+
+$pdo->exec("
+CREATE TABLE IF NOT EXISTS signal_profiles (
+    id                TEXT PRIMARY KEY,
+    label             TEXT NOT NULL,
+    api_url           TEXT NOT NULL DEFAULT '',
+    sender_number     TEXT NOT NULL DEFAULT '',
+    recipient_numbers TEXT NOT NULL DEFAULT '',
+    enabled           INTEGER DEFAULT 1,
+    created_at        TEXT,
+    updated_at        TEXT
+);
+");
+echo "✓ Table: signal_profiles\n";
+
+$pdo->exec("
+CREATE TABLE IF NOT EXISTS viber_profiles (
+    id           TEXT PRIMARY KEY,
+    label        TEXT NOT NULL,
+    auth_token   TEXT NOT NULL DEFAULT '',
+    receiver_ids TEXT NOT NULL DEFAULT '',
+    enabled      INTEGER DEFAULT 1,
+    created_at   TEXT,
+    updated_at   TEXT
+);
+");
+echo "✓ Table: viber_profiles\n";
+
+$pdo->exec("
+CREATE TABLE IF NOT EXISTS alert_profiles (
+    id         TEXT PRIMARY KEY,
+    label      TEXT NOT NULL,
+    channels   TEXT NOT NULL DEFAULT '[]',
+    enabled    INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+);
+");
+echo "✓ Table: alert_profiles\n";
+
+// ─── Migrations (safe to re-run on existing DBs) ──────────────────────────────
+
+// Add alert_profile_ids column to existing routes tables that only have alert_channels
+try {
+    $pdo->exec("ALTER TABLE routes ADD COLUMN alert_profile_ids TEXT DEFAULT '[]'");
+    echo "✓ Migration: added alert_profile_ids to routes\n";
+} catch (Exception $e) {
+    // Column already exists — no action needed
+}
+
 // ─── Seed default settings ────────────────────────────────────────────────────
 
 if ($init) {
@@ -146,23 +234,6 @@ if ($init) {
         'alert_traffic_threshold' => '30',
         'alert_min_samples'       => '5',
         'alert_max_per_day'       => '3',
-        'email_enabled'           => '0',
-        'email_host'              => '',
-        'email_port'              => '587',
-        'email_user'              => '',
-        'email_pass'              => '',
-        'email_from'              => '',
-        'email_to'                => '',
-        'telegram_enabled'        => '0',
-        'telegram_bot_token'      => '',
-        'telegram_chat_ids'       => '',
-        'viber_enabled'           => '0',
-        'viber_auth_token'        => '',
-        'viber_receiver_ids'      => '',
-        'signal_enabled'          => '0',
-        'signal_api_url'          => '',
-        'signal_sender'           => '',
-        'signal_recipients'       => '',
         'remember_token_hash'     => '',
         'remember_token_expiry'   => '0',
     ];
