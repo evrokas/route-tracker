@@ -1,7 +1,5 @@
 # Alert Profiles — v3 Enhancement Plan
 
-> Supersedes: `telegram-alert-profiles.md` (too narrow; extended to all channels)
-
 ---
 
 ## Problem Statement
@@ -35,9 +33,9 @@ Alert Profile "ops"
 ├── email    → Channel Profile "sysadmin"    (Postfix + ops@company.com)
 └── signal   → Channel Profile "oncall"      (signal-cli + on-call number)
 
-Route "Son → School"   → alert_profiles: ["family"]
-Route "Vangelis → Work" → alert_profiles: ["family", "work"]
-Route "Server Monitor"  → alert_profiles: ["ops"]
+Route "Son → School"    → alert_profile_ids: ["family"]
+Route "Vangelis → Work" → alert_profile_ids: ["family", "work"]
+Route "Server Monitor"  → alert_profile_ids: ["ops"]
 ```
 
 A route can belong to multiple alert profiles; each profile dispatches
@@ -104,7 +102,7 @@ updated_at   TEXT
 ```
 id         TEXT PRIMARY KEY   -- slug, e.g. "family", "work"
 label      TEXT NOT NULL      -- display name
-channels   TEXT NOT NULL      -- JSON: [{"type":"telegram","profile_id":"family_bot"}, ...]
+channels   TEXT NOT NULL      -- JSON array of channel-profile bindings
 enabled    INTEGER DEFAULT 1
 created_at TEXT
 updated_at TEXT
@@ -122,32 +120,30 @@ The `channels` column holds a JSON array of channel-profile bindings:
 ### Changes to Existing Tables
 
 #### `routes` table
-Add column:
-```
-alert_profile_ids  TEXT  DEFAULT '[]'   -- JSON array of alert profile id strings
-```
+- **Replace** `alert_channels TEXT DEFAULT '[]'` with `alert_profile_ids TEXT DEFAULT '[]'`
+- `alert_profile_ids` holds a JSON array of alert profile id strings
 
-The existing `alert_channels` column is **kept** for backwards compatibility.
-When a route has a non-empty `alert_profile_ids`, the profile system takes
-precedence; otherwise the legacy flat `alert_channels` path is used.
-
-### Migration / Backwards Compatibility
-
-- All new tables are `CREATE TABLE IF NOT EXISTS` — safe to run `--init` on
-  existing databases.
-- Existing routes using flat `alert_channels` continue to work unchanged through
-  the legacy code path in `AlertManager`.
-- The global `telegram_*`, `email_*`, `signal_*`, `viber_*` settings keys in
-  the `settings` table are **not removed** — they remain as the implicit
-  "default" configuration used by the legacy path.
+#### `settings` table
+- **Remove** the following keys from seed defaults and from all reads:
+  `telegram_enabled`, `telegram_bot_token`, `telegram_chat_ids`,
+  `email_enabled`, `email_host`, `email_port`, `email_user`, `email_pass`,
+  `email_from`, `email_to`,
+  `viber_enabled`, `viber_auth_token`, `viber_receiver_ids`,
+  `signal_enabled`, `signal_api_url`, `signal_sender`, `signal_recipients`
+- These keys are no longer needed; all channel config lives in the profile tables.
 
 ---
 
 ## `Config.php` Changes
 
-### Channel Profile Lookups
+### Removed Methods
 
-New public methods (one per channel type):
+The following methods are deleted entirely:
+- `getAlertConfig(string $channel)` — replaced by per-type profile lookups
+- `isAlertEnabled(string $channel)` — no longer relevant
+- `getRouteAlertChannels(array $route)` — replaced by `getRouteAlertProfiles()`
+
+### New Channel Profile Lookups
 
 ```
 getTelegramProfile(id)  → array|null
@@ -156,116 +152,91 @@ getSignalProfile(id)    → array|null
 getViberProfile(id)     → array|null
 ```
 
-Each returns the full config array for that profile (normalised to the same
-shape `AlertManager` already expects from `getAlertConfig()`), or `null` if the
-id is not found or the profile is disabled.
+Each queries the corresponding profile table and returns a normalised config
+array ready for `AlertManager`, or `null` if the id is not found or disabled.
 
-### Alert Profile Lookups
+### New Alert Profile Methods
 
 ```
-getAlertProfile(id)           → array|null   -- single profile with resolved channels
+getAlertProfile(id)           → array|null   -- single profile row
 getAllAlertProfiles()          → array         -- all profiles ordered by label
 getRouteAlertProfiles(route)  → array         -- profiles assigned to this route
 ```
 
-`getAlertProfile()` returns the raw DB row. Resolution of each binding's
-channel config is done inside `AlertManager` (keeps Config as a data layer).
+`getRouteAlertProfiles()` reads `alert_profile_ids` from the route, fetches
+each profile by id, and filters out disabled ones.
 
 ### CRUD Helpers (called from `api.php`)
 
 ```
-saveChannelProfile(type, data)    -- type in {telegram,email,signal,viber}
+saveChannelProfile(type, data)    -- type in {telegram, email, signal, viber}
 deleteChannelProfile(type, id)
 saveAlertProfile(data)
 deleteAlertProfile(id)
-```
-
-### Extended `getAlertConfig()` (legacy support)
-
-`getAlertConfig(channel)` is unchanged for the four plain channel names
-(`telegram`, `email`, `signal`, `viber`). No new magic string handling is
-needed because the profile system bypasses `getAlertConfig()` entirely.
-
-### Extended `isAlertEnabled()` / `getRouteAlertChannels()`
-
-These two methods are unchanged — they continue to serve the legacy flat path.
-A new parallel method is added:
-
-```
-getRouteAlertProfileIds(route)  → string[]   -- from alert_profile_ids JSON
 ```
 
 ---
 
 ## `AlertManager.php` Changes
 
-### Dispatch Flow (extended, not replaced)
+### Dispatch Flow (simplified)
 
-`evaluateAndAlert()` gains a new branch at the top:
+`evaluateAndAlert()` resolves alert profiles exclusively:
 
 ```
 profiles = config->getRouteAlertProfiles(route)
+if profiles is empty → return (nothing to do)
 
-if profiles is non-empty:
-    for each profile:
-        dispatchProfile(profile, subject, body, route)
-else:
-    // legacy path — unchanged
-    channels = config->getRouteAlertChannels(route)
-    dispatch(channels, subject, body, route)
+for each profile:
+    dispatchProfile(profile, subject, body, route)
 ```
 
-This means routes using the old flat `alert_channels` continue to work with
-zero changes. New routes use profiles exclusively.
+The old `dispatch(channels, …)` method and the flat-channel branch are removed.
 
-### New `dispatchProfile(profile, subject, body, route)`
-
-Iterates the `channels` array of a profile binding:
+### `dispatchProfile(profile, subject, body, route)`
 
 ```
 for each binding in profile.channels:
     cfg = config->get<Type>Profile(binding.profile_id)
     if cfg is null or disabled → log and skip
     switch binding.type:
-        telegram → sendTelegramCfg(cfg, body)
-        email    → sendEmailCfg(cfg, subject, body)
-        signal   → sendSignalCfg(cfg, body)
-        viber    → sendViberCfg(cfg, body)
+        telegram → sendTelegram(cfg, body)
+        email    → sendEmail(cfg, subject, body)
+        signal   → sendSignal(cfg, body)
+        viber    → sendViber(cfg, body)
     log result
 ```
 
-### Refactored Send Methods
+### Send Methods (profile-only signatures)
 
-Each channel's send logic is split into two layers:
-
-1. **`sendTelegram(body)`** — existing method, uses global settings, unchanged
-   (legacy path).
-2. **`sendTelegramCfg(cfg, body)`** — new method, accepts a pre-resolved config
-   array; contains the actual HTTP logic (currently duplicated in
-   `sendTelegram()`). The legacy method becomes a thin wrapper calling this.
-
-Same pattern for `sendEmail`/`sendEmailCfg`, `sendSignal`/`sendSignalCfg`,
-`sendViber`/`sendViberCfg`.
-
-### `sendTest()` and `sendTestChannel()`
-
-`sendTest()` — when a route uses profiles, test messages are dispatched via
-`dispatchProfile()` for each assigned profile.
-
-`sendTestChannel(channel)` — unchanged for legacy channel names.
-
-New method:
+All four send methods accept a pre-resolved config array — no global settings
+fallback:
 
 ```
-sendTestAlertProfile(profileId)   -- sends test to all channel profiles in the bundle
+sendTelegram(cfg, body)          -- cfg from getTelegramProfile()
+sendEmail(cfg, subject, body)    -- cfg from getEmailProfile()
+sendSignal(cfg, body)            -- cfg from getSignalProfile()
+sendViber(cfg, body)             -- cfg from getViberProfile()
+```
+
+The old zero-argument versions that pulled from global settings are removed.
+
+### Test Methods
+
+```
+sendTest(?routeId)                       -- dispatches via profiles for route(s)
+sendTestAlertProfile(profileId)          -- sends test to all channel profiles in bundle
 sendTestChannelProfile(type, profileId)  -- sends test via one specific channel profile
 ```
+
+`sendTestChannel(string $channel)` (the old plain-channel test) is removed.
 
 ---
 
 ## `api.php` Changes
 
-New action groups (all require active session):
+All alert-related legacy actions (`test_alert`, any flat channel actions) are
+removed. New action groups:
 
 ### Channel Profile CRUD
 
@@ -312,7 +283,6 @@ New action groups (all require active session):
 
 **Validation rules (both profile types):**
 - `id` must match `/^[a-z0-9_-]+$/`
-- `id` must not be `"default"` (reserved)
 - `label` must not be empty
 - Channel-profile-specific required fields validated per type
 - Cannot delete a channel profile that is referenced by an alert profile
@@ -322,24 +292,21 @@ New action groups (all require active session):
 
 ## Settings UI Changes (`settings.php` + `settings.js`)
 
-### New Tab or Section Structure
+### Alerts Tab Structure
 
-The existing Alerts tab is reorganised into three levels:
+The existing per-channel config blocks (single global bot token field, single
+SMTP block, etc.) are **removed entirely**. The Alerts tab is restructured:
 
 ```
 Alerts
-├── Global Settings  (thresholds, rate limits — unchanged)
+├── Global Settings   (thresholds, rate limits — unchanged)
 ├── Channel Profiles
-│   ├── Telegram profiles  [table + add/edit/delete/test]
-│   ├── Email profiles     [table + add/edit/delete/test]
-│   ├── Signal profiles    [table + add/edit/delete/test]
-│   └── Viber profiles     [table + add/edit/delete/test]
-└── Alert Profiles     [table + composer + add/edit/delete/test]
+│   ├── Telegram      [table + add/edit/delete/test]
+│   ├── Email         [table + add/edit/delete/test]
+│   ├── Signal        [table + add/edit/delete/test]
+│   └── Viber         [table + add/edit/delete/test]
+└── Alert Profiles    [table + composer + add/edit/delete/test]
 ```
-
-The old global per-channel config blocks (single bot token field, etc.) are
-kept under a **"Legacy / Default"** collapsible inside each channel section,
-clearly labelled as backwards-compatible defaults.
 
 ### Channel Profile UI (one per channel type)
 
@@ -347,37 +314,32 @@ Each channel type section shows:
 - A table: `ID | Label | Target(s) | Enabled | Actions`
 - **Actions per row:** Edit (inline form expand) / Delete (with guard if in
   use) / Test (fires `channel_profiles_test`, shows toast)
-- **"+ Add profile"** button opens the inline form
-- Form fields vary by channel type (bot token for Telegram, SMTP fields for
-  Email, etc.)
+- **"+ Add profile"** button opens the inline form below the table
+- Form fields vary by channel type (bot token + chat IDs for Telegram; SMTP
+  fields + recipients for Email; etc.)
 
 ### Alert Profile UI
 
 - A table: `ID | Label | Channels | Enabled | Actions`
-- **Channels column** shows badges: `TG: family_bot`, `Email: personal`
+- **Channels column** shows compact badges: `TG: family_bot`, `Email: personal`
 - **Edit form** includes a channel binding composer:
-  - A "+" button to add a binding row
+  - A "+" button adds a binding row
   - Each row: channel type dropdown → profile dropdown (populated from saved
-    channel profiles of that type) → remove button
+    profiles of that type) → remove button
 - **Test button** per row fires `alert_profiles_test`
 
 ### Route Form Update
 
-The route editor's alert assignment changes from:
-
-```
-☑ telegram   ☑ email   ☐ viber   ☐ signal
-```
-
-to a multi-select of alert profiles:
+The route editor's alert assignment replaces the old channel checkbox list with
+a tag-style multi-select of alert profiles:
 
 ```
 Alert Profiles: [family ×] [work ×]  [+ Add]
 ```
 
-Implemented as a tag-style multi-select populated from `alert_profiles_list`.
-The legacy `alert_channels` field is still saved for backwards compatibility
-when no profiles are selected (so existing routes keep working).
+Populated from `alert_profiles_list`. Saves to `alert_profile_ids`.
+The `alert_channels` field is removed from the route form and the route save
+handler.
 
 ---
 
@@ -386,21 +348,18 @@ when no profiles are selected (so existing routes keep working).
 No changes. Rate limiting remains keyed by `route_id` in `alert_counts.json`,
 applying regardless of how many profiles or channel profiles receive the alert.
 
-Per-profile or per-recipient rate limiting is a potential future enhancement,
-out of scope for this plan.
-
 ---
 
 ## File Change Summary
 
 | File | Change |
 |---|---|
-| `schema.php` | 5 new tables; add `alert_profile_ids` to `routes`; update `--reset` |
-| `Config.php` | Profile lookup + CRUD methods; new `getRouteAlertProfileIds()` |
-| `AlertManager.php` | Dual-path dispatch; refactored `send*Cfg()` methods; new test helpers |
-| `api.php` | `channel_profiles_*` and `alert_profiles_*` action groups |
-| `settings.php` | Reorganised Alerts tab; channel profile tables; alert profile composer |
-| `settings.js` | Profile CRUD functions; route form tag-select for alert profiles |
+| `schema.php` | 5 new tables; replace `alert_channels` with `alert_profile_ids` on routes; remove channel settings keys |
+| `Config.php` | Remove `getAlertConfig`, `isAlertEnabled`, `getRouteAlertChannels`; add profile lookup + CRUD methods |
+| `AlertManager.php` | Remove flat-channel dispatch and global-settings send methods; profile-only dispatch |
+| `api.php` | Remove legacy channel actions; add `channel_profiles_*` and `alert_profiles_*` groups |
+| `settings.php` | Remove per-channel global config blocks; add channel profile tables + alert profile composer |
+| `settings.js` | Remove channel save/load functions; add profile CRUD + route form tag-select |
 
 No changes to: `collector.php`, `advisor.php`, `DepartureAdvisor.php`,
 `dashboard.php`, `dashboard.js`, `map.php`, `auth.php`, `login.php`.
@@ -409,24 +368,22 @@ No changes to: `collector.php`, `advisor.php`, `DepartureAdvisor.php`,
 
 ## Testing Checklist
 
-1. `php schema.php --init` on a clean DB creates all 5 new tables.
-2. `php schema.php --init` on an existing DB is non-destructive.
-3. `php schema.php --reset` recreates all tables correctly.
-4. Routes with legacy `alert_channels` and no `alert_profile_ids` behave
-   identically to today — no regression.
-5. A route assigned to one alert profile dispatches to all channel profiles in
+1. `php schema.php --init` on a clean DB creates all 5 new tables and the
+   updated `routes` schema.
+2. `php schema.php --reset` drops and recreates everything cleanly.
+3. A route with no `alert_profile_ids` sends no alerts (no silent fallback).
+4. A route assigned to one alert profile dispatches to all channel profiles in
    that profile.
-6. A route assigned to two alert profiles dispatches independently to each.
-7. A disabled channel profile is skipped; other bindings in the same alert
+5. A route assigned to two alert profiles dispatches independently to each.
+6. A disabled channel profile is skipped; other bindings in the same alert
    profile still fire.
-8. A disabled alert profile is skipped entirely.
-9. Deleting a channel profile that is in use returns a validation error.
-10. Deleting an alert profile assigned to a route returns a validation error.
-11. Test actions (per channel profile, per alert profile, per route) send
+7. A disabled alert profile is skipped entirely.
+8. Deleting a channel profile that is in use returns a validation error.
+9. Deleting an alert profile assigned to a route returns a validation error.
+10. Test actions (per channel profile, per alert profile, per route) send
     messages to the correct recipients only.
-12. `php collector.php --test-alerts` uses profile dispatch for profile-enabled
-    routes, legacy dispatch for legacy routes.
-13. Settings UI: create → edit → test → delete round-trip for each channel type.
-14. Settings UI: alert profile composer correctly saves and reloads channel
+11. `php collector.php --test-alerts` dispatches via profiles for all routes.
+12. Settings UI: create → edit → test → delete round-trip for each channel type.
+13. Settings UI: alert profile composer correctly saves and reloads channel
     bindings.
-15. Route editor: assigning and removing alert profiles persists correctly.
+14. Route editor: assigning and removing alert profiles persists correctly.
