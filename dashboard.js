@@ -250,12 +250,16 @@ async function renderAdvisor(box) {
       ? r.last_check.substring(11, 16)
       : null;
 
+    const monitorLink = r.monitor_url
+      ? `<a href="${r.monitor_url}" target="_blank" rel="noopener noreferrer" class="card-link" title="Open monitoring page">📊</a>`
+      : '';
+
     html += `
       <div class="card advisor-card">
         <div class="card-header">
           <span class="card-title">${r.route_label}</span>
           <span class="card-badge badge-arrive">${r.days ? r.days + ' · ' : ''}arrive ${r.arrive_time}</span>
-          ${gmapsLink(r.origin, r.destination)}
+          ${monitorLink}${gmapsLink(r.origin, r.destination)}
         </div>
         <div class="advisor-departure">
           <span class="advisor-leave-label">Leave by</span>

@@ -439,6 +439,8 @@ class DepartureAdvisor
                     $untilDepart = $recDepMin - $currentMinutes;
                 }
 
+                $monitorUrl = $this->config->getMonitoringUrl($route['id'], $schedKey, $today);
+
                 $result[] = [
                     'route_id'              => $route['id'],
                     'route_label'           => $route['label'],
@@ -455,6 +457,7 @@ class DepartureAdvisor
                     'last_check'            => $state['last_check'] ?? null,
                     'buffer_mode'           => $route['advisor_buffer_mode'],
                     'fixed_buffer'          => $route['advisor_fixed_buffer'],
+                    'monitor_url'           => $monitorUrl,
                 ];
             }
         }

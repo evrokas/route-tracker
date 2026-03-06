@@ -736,6 +736,26 @@ class Config
         return $token;
     }
 
+    /**
+     * Returns the monitor URL for an existing valid token for this window, or '' if none.
+     * Does NOT create a new token — tokens are only created when an alert fires.
+     */
+    public function getMonitoringUrl(string $routeId, string $scheduleKey, string $date): string
+    {
+        $appUrl = rtrim($this->getSetting('app_url', ''), '/');
+        if (!$appUrl) return '';
+
+        $st = $this->pdo->prepare("
+            SELECT token FROM monitoring_tokens
+            WHERE route_id=? AND schedule_key=? AND date=? AND expires_at > datetime('now')
+        ");
+        $st->execute([$routeId, $scheduleKey, $date]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return '';
+
+        return $appUrl . '/monitor.php?token=' . $row['token'];
+    }
+
     /** Returns token row or null if not found (may be expired). */
     public function getMonitoringToken(string $token): ?array
     {
