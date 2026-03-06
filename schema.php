@@ -57,6 +57,7 @@ if ($reset) {
     $pdo->exec('DROP TABLE IF EXISTS email_profiles;');
     $pdo->exec('DROP TABLE IF EXISTS signal_profiles;');
     $pdo->exec('DROP TABLE IF EXISTS viber_profiles;');
+    $pdo->exec('DROP TABLE IF EXISTS monitoring_tokens;');
     echo "Tables dropped.\n\n";
     $init = true;
 }
@@ -209,6 +210,20 @@ CREATE TABLE IF NOT EXISTS alert_profiles (
 ");
 echo "✓ Table: alert_profiles\n";
 
+$pdo->exec("
+CREATE TABLE IF NOT EXISTS monitoring_tokens (
+    token        TEXT PRIMARY KEY,
+    route_id     TEXT NOT NULL,
+    schedule_key TEXT NOT NULL,
+    date         TEXT NOT NULL,
+    arrive_time  TEXT NOT NULL,
+    route_label  TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    created_at   TEXT NOT NULL
+);
+");
+echo "✓ Table: monitoring_tokens\n";
+
 // ─── Migrations (safe to re-run on existing DBs) ──────────────────────────────
 
 // Add alert_profile_ids column to existing routes tables that only have alert_channels
@@ -234,6 +249,7 @@ if ($init) {
         'alert_traffic_threshold' => '30',
         'alert_min_samples'       => '5',
         'alert_max_per_day'       => '3',
+        'app_url'                 => '',
         'remember_token_hash'     => '',
         'remember_token_expiry'   => '0',
     ];

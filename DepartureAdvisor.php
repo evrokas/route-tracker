@@ -152,6 +152,16 @@ class DepartureAdvisor
             return;
         }
 
+        // ── Generate monitoring URL (if app_url is configured) ────────────
+        $monitorUrl = '';
+        $appUrl     = rtrim($this->config->getSetting('app_url', ''), '/');
+        if ($appUrl) {
+            $token      = $this->config->createOrGetMonitoringToken(
+                $route['id'], $schedKey, $todayDate, $arriveTime, $route['label']
+            );
+            $monitorUrl = $appUrl . '/monitor.php?token=' . $token;
+        }
+
         // ── Build alert message ───────────────────────────────────────────
         $gmapsUrl = "https://www.google.com/maps/dir/?api=1" .
                     "&origin=" . urlencode($origin) .
@@ -171,7 +181,7 @@ class DepartureAdvisor
         $msg = $this->buildStageMessage(
             $stage, $route['label'], $arriveTime, $recommendedDepart,
             $liveMin, $liveSummary, $minsToDeparture, $bufferMin,
-            $vsAvg, $gmapsUrl
+            $vsAvg, $gmapsUrl, $monitorUrl
         );
 
         $subject = $this->stageSubject($stage, $route['label']);
@@ -210,9 +220,11 @@ class DepartureAdvisor
     private function buildStageMessage(
         string $stage, string $routeLabel, string $arriveTime,
         string $recommendedDepart, int $liveMin, string $liveSummary,
-        int $minsToDeparture, int $bufferMin, string $vsAvg, string $gmapsUrl
+        int $minsToDeparture, int $bufferMin, string $vsAvg,
+        string $gmapsUrl, string $monitorUrl = ''
     ): string {
-        $via = $liveSummary ? " via {$liveSummary}" : '';
+        $via     = $liveSummary ? " via {$liveSummary}" : '';
+        $monitor = $monitorUrl ? "\n📊 {$monitorUrl}" : '';
 
         switch ($stage) {
             case 'planning':
@@ -221,7 +233,7 @@ class DepartureAdvisor
                        "Target arrival: {$arriveTime}\n" .
                        "Traffic looks normal. Leave by {$recommendedDepart} to arrive by {$arriveTime}{$via} ({$liveMin} min{$vsAvg}).\n" .
                        "Buffer: {$bufferMin} min\n\n" .
-                       "🧭 {$gmapsUrl}";
+                       "🧭 {$gmapsUrl}{$monitor}";
 
             case 'window':
                 return "🕐 Departure Window\n\n" .
@@ -229,14 +241,14 @@ class DepartureAdvisor
                        "Target arrival: {$arriveTime}\n" .
                        "Recommended departure: {$recommendedDepart}\n" .
                        "Live estimate: {$liveMin} min{$via}{$vsAvg}\n\n" .
-                       "🧭 {$gmapsUrl}";
+                       "🧭 {$gmapsUrl}{$monitor}";
 
             case 'reminder':
                 $inMin = $minsToDeparture > 0 ? "Leave in {$minsToDeparture} min (by {$recommendedDepart})" : "Leave now!";
                 return "⏰ Departure Reminder\n\n" .
                        "Route: {$routeLabel}\n" .
                        "{$inMin} for {$arriveTime} arrival. ({$liveMin} min{$via}{$vsAvg})\n\n" .
-                       "🧭 {$gmapsUrl}";
+                       "🧭 {$gmapsUrl}{$monitor}";
 
             case 'urgent':
                 $inMin = max(0, $minsToDeparture);
@@ -244,14 +256,14 @@ class DepartureAdvisor
                        "Route: {$routeLabel}\n" .
                        "Traffic building — {$liveMin} min{$via}{$vsAvg}\n" .
                        "Target arrival: {$arriveTime}\n\n" .
-                       "🧭 {$gmapsUrl}";
+                       "🧭 {$gmapsUrl}{$monitor}";
 
             case 'last_call':
                 return "🚨 Departure time!\n\n" .
                        "Route: {$routeLabel}\n" .
                        "Best estimate: {$liveMin} min{$via}{$vsAvg}\n" .
                        "Target arrival: {$arriveTime}\n\n" .
-                       "🧭 {$gmapsUrl}";
+                       "🧭 {$gmapsUrl}{$monitor}";
 
             default:
                 return "🚗 Route Advisor\n\nRoute: {$routeLabel}\nLeave by {$recommendedDepart}.";

@@ -77,6 +77,13 @@ foreach ($routes as $route) {
     }
 }
 
+// ─── Housekeeping ─────────────────────────────────────────────────────────────
+
+$deleted = $config->cleanExpiredMonitoringTokens();
+if ($deleted > 0) {
+    advisorLog($logFile, "Housekeeping: removed {$deleted} expired monitoring token(s)");
+}
+
 advisorLog($logFile, "Run complete");
 exit(0);
 

@@ -84,6 +84,15 @@ $currentTz = $config->getTimezone();
   </div>
 
   <div class="settings-section">
+    <div class="section-title">Application URL</div>
+    <div class="field-group">
+      <label>Base URL</label>
+      <input type="url" id="app_url" placeholder="https://example.com/apps/tracker">
+      <div class="field-hint">Used to build monitoring links sent in Telegram alerts. Leave empty to disable monitoring links.</div>
+    </div>
+  </div>
+
+  <div class="settings-section">
     <div class="section-title">Timezone &amp; Collection</div>
     <div class="field-group">
       <label>Timezone</label>

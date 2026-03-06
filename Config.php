@@ -702,6 +702,57 @@ class Config
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Monitoring tokens
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns an existing valid token for the route/schedule/date, or creates a new one.
+     * Token expires 30 minutes after the target arrival time.
+     */
+    public function createOrGetMonitoringToken(
+        string $routeId, string $scheduleKey, string $date,
+        string $arriveTime, string $routeLabel
+    ): string {
+        $st = $this->pdo->prepare("
+            SELECT token FROM monitoring_tokens
+            WHERE route_id=? AND schedule_key=? AND date=? AND expires_at > datetime('now')
+        ");
+        $st->execute([$routeId, $scheduleKey, $date]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return $row['token'];
+        }
+
+        $expires = date('Y-m-d H:i:s', strtotime("{$date} {$arriveTime} +30 minutes"));
+        $token   = bin2hex(random_bytes(16));
+        $now     = date('Y-m-d H:i:s');
+
+        $this->pdo->prepare("
+            INSERT OR REPLACE INTO monitoring_tokens
+                (token, route_id, schedule_key, date, arrive_time, route_label, expires_at, created_at)
+            VALUES (?,?,?,?,?,?,?,?)
+        ")->execute([$token, $routeId, $scheduleKey, $date, $arriveTime, $routeLabel, $expires, $now]);
+
+        return $token;
+    }
+
+    /** Returns token row or null if not found (may be expired). */
+    public function getMonitoringToken(string $token): ?array
+    {
+        $st = $this->pdo->prepare("SELECT * FROM monitoring_tokens WHERE token=?");
+        $st->execute([$token]);
+        return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** Deletes all tokens whose expires_at is in the past. Returns count deleted. */
+    public function cleanExpiredMonitoringTokens(): int
+    {
+        $st = $this->pdo->prepare("DELETE FROM monitoring_tokens WHERE expires_at < datetime('now')");
+        $st->execute();
+        return $st->rowCount();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 

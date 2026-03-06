@@ -64,6 +64,7 @@ async function loadGeneral() {
   setVal('google_maps_api_key',    s.google_maps_api_key    || '');
   setVal('google_maps_language',   s.google_maps_language   || 'el');
   setVal('google_maps_region',     s.google_maps_region     || 'gr');
+  setVal('app_url',                s.app_url                || '');
   setVal('timezone',               s.timezone               || 'Europe/Athens');
   setVal('window_before_minutes',  s.window_before_minutes  || '15');
   setVal('window_after_minutes',   s.window_after_minutes   || '5');
@@ -75,6 +76,7 @@ async function saveGeneral() {
     google_maps_api_key:    getVal('google_maps_api_key'),
     google_maps_language:   getVal('google_maps_language'),
     google_maps_region:     getVal('google_maps_region'),
+    app_url:                getVal('app_url'),
     timezone:               getVal('timezone'),
     window_before_minutes:  getVal('window_before_minutes'),
     window_after_minutes:   getVal('window_after_minutes'),
