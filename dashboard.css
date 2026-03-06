@@ -87,9 +87,11 @@ button.primary:hover { background: #4a6ee0; }
   padding: 8px 24px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.route-bar::-webkit-scrollbar { display: none; }
 
 .chip {
   background: var(--card);
@@ -109,15 +111,16 @@ button.primary:hover { background: #4a6ee0; }
 .filter-group {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .filter-sep {
   width: 1px;
+  min-height: 20px;
   align-self: stretch;
   background: var(--border);
-  margin: 0 4px;
+  margin: 0 12px;
   flex-shrink: 0;
 }
 
