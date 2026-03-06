@@ -325,6 +325,16 @@ input[type=text].sched-time {
 }
 .routes-table tr:last-child td { border-bottom: none; }
 
+.ap-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  background: rgba(91,124,246,.18);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
 /* ─── Route form ─────────────────────────────────────────────────────────── */
 
 .route-form { border: 2px solid var(--accent); }

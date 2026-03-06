@@ -128,8 +128,12 @@ async function changePassword() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 async function loadRoutes() {
-  const data = await apiGet({ action: 'route_list', all: 1 });
-  renderRouteList(data?.routes || []);
+  const [routeData, apData] = await Promise.all([
+    apiGet({ action: 'route_list', all: 1 }),
+    apiGet({ action: 'alert_profiles_list' }),
+  ]);
+  _allAlertProfiles = apData?.alert_profiles || [];
+  renderRouteList(routeData?.routes || []);
 }
 
 function renderRouteList(routes) {
@@ -141,13 +145,23 @@ function renderRouteList(routes) {
     return;
   }
 
+  // Build a label lookup from cached alert profiles
+  const apLookup = {};
+  (_allAlertProfiles || []).forEach(ap => { apLookup[ap.id] = ap.label; });
+
   let html = '<div class="routes-table"><table>';
-  html += '<thead><tr><th>ID</th><th>Label</th><th>Origin → Destination</th><th>Advisor</th><th>Actions</th></tr></thead><tbody>';
+  html += '<thead><tr><th>ID</th><th>Label</th><th>Origin → Destination</th><th>Alert Profiles</th><th>Advisor</th><th>Actions</th></tr></thead><tbody>';
   for (const r of routes) {
+    const ids = Array.isArray(r.alert_profile_ids) ? r.alert_profile_ids : [];
+    const profileBadges = ids.length
+      ? ids.map(id => `<span class="ap-badge">${escHtml(apLookup[id] || id)}</span>`).join(' ')
+      : '<span style="color:var(--muted)">—</span>';
+
     html += `<tr>
-      <td><code>${r.id}</code></td>
+      <td><code>${escHtml(r.id)}</code></td>
       <td>${escHtml(r.label)}</td>
       <td style="font-size:12px;color:var(--muted)">${escHtml(r.origin||'')} → ${escHtml(r.destination||'')}</td>
+      <td>${profileBadges}</td>
       <td>${r.advisor_enabled ? '✓' : '–'}</td>
       <td>
         <button class="btn-tiny" onclick='showRouteForm(${JSON.stringify(r).replace(/</g,'&lt;')})'>Edit</button>
