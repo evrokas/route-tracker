@@ -61,18 +61,20 @@ $apiBase = 'api.php';
   </div>
 </div>
 
-<!-- ─── ROUTE CHIPS ─────────────────────────────────────────────────────── -->
+<!-- ─── FILTER BAR ─────────────────────────────────────────────────────── -->
 
-<div class="route-bar" id="routeBar">
-  <div class="chip active" data-id="">All Routes</div>
-</div>
-
-<div class="route-bar time-bar" id="timeBar" style="display:none">
-  <div class="chip time-chip active" data-tw="all">All</div>
-  <div class="chip time-chip" data-tw="today">Today</div>
-  <div class="chip time-chip" data-tw="upcoming">Upcoming</div>
-  <div class="chip time-chip" data-tw="next3h">Next 3 h</div>
-  <div class="chip time-chip" data-tw="next">Next</div>
+<div class="route-bar" id="filterBar">
+  <div id="routeBar" class="filter-group">
+    <div class="chip active" data-id="">All Routes</div>
+  </div>
+  <div class="filter-sep" id="timeSep" style="display:none"></div>
+  <div id="timeBar" class="filter-group" style="display:none">
+    <div class="chip time-chip active" data-tw="all">All</div>
+    <div class="chip time-chip" data-tw="today">Today</div>
+    <div class="chip time-chip" data-tw="upcoming">Upcoming</div>
+    <div class="chip time-chip" data-tw="next3h">Next 3 h</div>
+    <div class="chip time-chip" data-tw="next">Next</div>
+  </div>
 </div>
 
 <!-- ─── TAB BAR ────────────────────────────────────────────────────────── -->

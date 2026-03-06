@@ -86,6 +86,7 @@ button.primary:hover { background: #4a6ee0; }
   border-bottom: 1px solid var(--border);
   padding: 8px 24px;
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
@@ -105,13 +106,22 @@ button.primary:hover { background: #4a6ee0; }
 .chip:hover  { border-color: var(--accent); color: var(--text); }
 .chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-.time-bar {
-  background: rgba(91,124,246,.06);
-  border-top: none;
-  padding-top: 6px;
-  padding-bottom: 6px;
+.filter-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
 }
-.time-chip.active { background: var(--green, #4caf82); border-color: var(--green, #4caf82); }
+
+.filter-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.time-chip.active { background: #4caf82; border-color: #4caf82; }
 
 /* ─── Tab Bar ───────────────────────────────────────────────────────────── */
 .tab-bar {

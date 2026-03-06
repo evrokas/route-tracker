@@ -148,9 +148,12 @@ async function render() {
   setStatus('loading');
   updateFilterBadge();
 
-  // Show time bar only on the advisor tab
+  // Show time chips only on the advisor tab
+  const onAdvisor = state.tab === 'advisor';
   const timeBar = document.getElementById('timeBar');
-  if (timeBar) timeBar.style.display = state.tab === 'advisor' ? '' : 'none';
+  const timeSep = document.getElementById('timeSep');
+  if (timeBar) timeBar.style.display = onAdvisor ? '' : 'none';
+  if (timeSep) timeSep.style.display = onAdvisor ? '' : 'none';
 
   const box = document.getElementById('content');
   box.innerHTML = '<div class="loading"><div class="spinner"></div>Loading…</div>';
