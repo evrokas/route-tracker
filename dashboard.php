@@ -67,6 +67,14 @@ $apiBase = 'api.php';
   <div class="chip active" data-id="">All Routes</div>
 </div>
 
+<div class="route-bar time-bar" id="timeBar" style="display:none">
+  <div class="chip time-chip active" data-tw="all">All</div>
+  <div class="chip time-chip" data-tw="today">Today</div>
+  <div class="chip time-chip" data-tw="upcoming">Upcoming</div>
+  <div class="chip time-chip" data-tw="next3h">Next 3 h</div>
+  <div class="chip time-chip" data-tw="next">Next</div>
+</div>
+
 <!-- ─── TAB BAR ────────────────────────────────────────────────────────── -->
 
 <div class="tab-bar">

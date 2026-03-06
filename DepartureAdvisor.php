@@ -440,6 +440,7 @@ class DepartureAdvisor
                 }
 
                 $monitorUrl = $this->config->getMonitoringUrl($route['id'], $schedKey, $today);
+                $runsToday  = in_array((int)date('N'), $days, true);
 
                 $result[] = [
                     'route_id'              => $route['id'],
@@ -448,6 +449,7 @@ class DepartureAdvisor
                     'destination'           => $route['destination'],
                     'arrive_time'           => $arriveTime,
                     'days'                  => $sched['days'] ?? '',
+                    'runs_today'            => $runsToday,
                     'recommended_departure' => $recDep,
                     'live_duration_seconds' => $state['live_duration_seconds'] ?? null,
                     'stages_fired'          => $state['stages_fired'] ?? [],

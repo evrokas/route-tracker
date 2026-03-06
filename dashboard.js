@@ -2,12 +2,13 @@
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 let state = {
-  tab:     'advisor',
-  routeId: '',
-  year:    '',
-  month:   '',
-  routes:  [],
-  cache:   {},
+  tab:        'advisor',
+  routeId:    '',
+  year:       '',
+  month:      '',
+  timeWindow: 'all',
+  routes:     [],
+  cache:      {},
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -95,6 +96,16 @@ async function init() {
     state.month = e.target.value; clearCache(); render();
   });
 
+  // Time-window chips (advisor tab only)
+  document.querySelectorAll('.time-chip').forEach(c => {
+    c.addEventListener('click', () => {
+      document.querySelectorAll('.time-chip').forEach(x => x.classList.remove('active'));
+      c.classList.add('active');
+      state.timeWindow = c.dataset.tw;
+      render();
+    });
+  });
+
   try {
     const d = await api({ action: 'route_list' });
     state.routes = d.routes || [];
@@ -136,6 +147,11 @@ function buildChips() {
 async function render() {
   setStatus('loading');
   updateFilterBadge();
+
+  // Show time bar only on the advisor tab
+  const timeBar = document.getElementById('timeBar');
+  if (timeBar) timeBar.style.display = state.tab === 'advisor' ? '' : 'none';
+
   const box = document.getElementById('content');
   box.innerHTML = '<div class="loading"><div class="spinner"></div>Loading…</div>';
 
@@ -200,17 +216,37 @@ function gmapsLink(origin, destination) {
 // TAB: Advisor
 // ═══════════════════════════════════════════════════════════════════════════
 async function renderAdvisor(box) {
-  const d    = await api({ action: 'advisor_status', ...filters() });
-  const rows = d.advisor || [];
+  const d       = await api({ action: 'advisor_status', ...filters() });
+  const allRows = d.advisor || [];
 
-  const allRoutes = state.routes;
-
-  if (!rows.length) {
+  if (!allRows.length) {
     box.innerHTML = `
       <div class="empty">
         No advisor-enabled routes yet.<br>
         Go to <a href="settings.php">⚙️ Settings → Routes</a> to configure a route with the advisor enabled.
       </div>`;
+    return;
+  }
+
+  // Apply time-window filter
+  const tw = state.timeWindow || 'all';
+  let rows = allRows;
+
+  if (tw === 'today') {
+    rows = allRows.filter(r => r.runs_today);
+  } else if (tw === 'upcoming') {
+    rows = allRows.filter(r => r.runs_today && r.until_arrival_min > -15);
+  } else if (tw === 'next3h') {
+    rows = allRows.filter(r => r.runs_today && r.until_arrival_min > -15 && r.until_arrival_min <= 180);
+  } else if (tw === 'next') {
+    const upcoming = allRows.filter(r => r.runs_today && r.until_arrival_min > -15);
+    upcoming.sort((a, b) => a.until_arrival_min - b.until_arrival_min);
+    rows = upcoming.slice(0, 1);
+  }
+
+  if (!rows.length) {
+    const labels = { today: 'today', upcoming: 'upcoming', next3h: 'within 3 hours', next: 'next event' };
+    box.innerHTML = `<div class="empty">No advisor events ${labels[tw] || ''} match the current filter.</div>`;
     return;
   }
 
