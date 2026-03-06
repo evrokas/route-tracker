@@ -62,6 +62,57 @@ async function api(params = {}) {
 function clearCache() { state.cache = {}; }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Advisor auto-refresh + live countdown tick
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _autoRefreshTimer = null;
+let _tickTimer        = null;
+let _clockTimer       = null;
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  _autoRefreshTimer = setInterval(() => {
+    if (state.tab === 'advisor') { clearCache(); render(); }
+  }, 60000);
+}
+
+function stopAutoRefresh() {
+  if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = null; }
+}
+
+function startAdvisorTick() {
+  stopAdvisorTick();
+  _tickTimer = setInterval(_tickCountdowns, 1000);
+}
+
+function stopAdvisorTick() {
+  if (_tickTimer) { clearInterval(_tickTimer); _tickTimer = null; }
+}
+
+function _tickCountdowns() {
+  const now    = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+
+  document.querySelectorAll('.advisor-countdown[data-depart]').forEach(el => {
+    const t = el.dataset.depart;
+    if (!t) return;
+    const [h, m]   = t.split(':').map(Number);
+    const diffMin  = Math.round((h * 60 + m) - nowMin);
+
+    if (diffMin > 0) {
+      el.textContent = `in ${diffMin} min`;
+      el.className   = 'advisor-countdown';
+    } else if (diffMin >= -5) {
+      el.textContent = 'now!';
+      el.className   = 'advisor-countdown urgent';
+    } else {
+      el.textContent = `${Math.abs(diffMin)} min ago`;
+      el.className   = 'advisor-countdown muted';
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Filters
 // ═══════════════════════════════════════════════════════════════════════════
 function filters() {
@@ -115,6 +166,7 @@ async function init() {
   }
 
   render();
+  startAutoRefresh();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -145,6 +197,7 @@ function buildChips() {
 // Render dispatcher
 // ═══════════════════════════════════════════════════════════════════════════
 async function render() {
+  stopAdvisorTick();
   setStatus('loading');
   updateFilterBadge();
 
@@ -174,7 +227,7 @@ async function render() {
   }
 }
 
-function refresh() { clearCache(); render(); }
+function refresh() { clearCache(); stopAutoRefresh(); render(); }
 
 function updateFilterBadge() {
   const badge = document.getElementById('filterBadge');
@@ -192,9 +245,23 @@ function updateFilterBadge() {
 function setStatus(s) {
   const dot  = document.getElementById('statusDot');
   const text = document.getElementById('statusText');
-  if (s === 'loading') { dot.className = 'status-dot';     text.textContent = 'Loading…'; }
-  if (s === 'ok')      { dot.className = 'status-dot ok';  text.textContent = new Date().toLocaleTimeString(); }
-  if (s === 'err')     { dot.className = 'status-dot err'; text.textContent = 'Error'; }
+  if (s === 'loading') {
+    dot.className    = 'status-dot';
+    text.textContent = 'Loading…';
+    if (_clockTimer) { clearInterval(_clockTimer); _clockTimer = null; }
+  }
+  if (s === 'ok') {
+    dot.className = 'status-dot ok';
+    const tick = () => { text.textContent = new Date().toLocaleTimeString(); };
+    tick();
+    if (_clockTimer) clearInterval(_clockTimer);
+    _clockTimer = setInterval(tick, 1000);
+  }
+  if (s === 'err') {
+    dot.className    = 'status-dot err';
+    text.textContent = 'Error';
+    if (_clockTimer) { clearInterval(_clockTimer); _clockTimer = null; }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -267,12 +334,13 @@ async function renderAdvisor(box) {
     let countdownHtml = '';
     if (r.until_departure_min != null) {
       const m = r.until_departure_min;
+      const depAttr = r.recommended_departure ? ` data-depart="${r.recommended_departure}"` : '';
       if (m > 0) {
-        countdownHtml = `<span class="advisor-countdown">in ${m} min</span>`;
+        countdownHtml = `<span class="advisor-countdown"${depAttr}>in ${m} min</span>`;
       } else if (m >= -5) {
-        countdownHtml = `<span class="advisor-countdown urgent">now!</span>`;
+        countdownHtml = `<span class="advisor-countdown urgent"${depAttr}>now!</span>`;
       } else {
-        countdownHtml = `<span class="advisor-countdown muted">${Math.abs(m)} min ago</span>`;
+        countdownHtml = `<span class="advisor-countdown muted"${depAttr}>${Math.abs(m)} min ago</span>`;
       }
     }
 
@@ -316,6 +384,8 @@ async function renderAdvisor(box) {
   html += '<div class="empty" style="font-size:12px;margin-top:8px;color:var(--muted)">Updated by advisor.php every 5 min via cron</div>';
 
   box.innerHTML = html;
+  startAdvisorTick();
+  startAutoRefresh();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
