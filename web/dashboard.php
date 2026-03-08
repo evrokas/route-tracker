@@ -4,9 +4,9 @@
  * Session-authenticated dashboard.
  */
 
-$baseDir = __DIR__;
-require_once $baseDir . '/Config.php';
-require_once $baseDir . '/auth.php';
+$baseDir = dirname(__DIR__);
+require_once $baseDir . '/src/Config.php';
+require_once $baseDir . '/src/auth.php';
 
 Auth::requireLogin();
 
@@ -31,7 +31,7 @@ $apiBase = 'api.php';
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🗺️ Route Tracker</title>
-<link rel="stylesheet" href="dashboard.css">
+<link rel="stylesheet" href="css/dashboard.css">
 </head>
 <body>
 
@@ -99,7 +99,7 @@ $apiBase = 'api.php';
   const API_TOKEN = '';
 </script>
 
-<script src="dashboard.js"></script>
+<script src="js/dashboard.js"></script>
 
 </body>
 </html>

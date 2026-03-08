@@ -1,0 +1,12 @@
+# Route Tracker v3 — web security
+DirectoryIndex dashboard.php
+
+# Deny access to sensitive file types
+<FilesMatch "\.(log|sqlite|json|md)$">
+    Require all denied
+</FilesMatch>
+
+# Deny hidden files
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>

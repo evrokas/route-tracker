@@ -11,7 +11,7 @@
  *   php schema.php --reset  # Drop all tables, recreate, re-seed (DELETES ALL DATA)
  */
 
-$baseDir = __DIR__;
+$baseDir = dirname(__DIR__);
 
 $init  = in_array('--init',  $argv ?? [], true);
 $reset = in_array('--reset', $argv ?? [], true);

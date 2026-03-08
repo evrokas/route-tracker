@@ -16,9 +16,9 @@
  *   php collector.php --test-alerts --route=dad_work
  */
 
-$baseDir = __DIR__;
-require_once $baseDir . '/Config.php';
-require_once $baseDir . '/AlertManager.php';
+$baseDir = dirname(__DIR__);
+require_once __DIR__ . '/Config.php';
+require_once __DIR__ . '/AlertManager.php';
 
 // Only run CLI logic if executed directly (not included from advisor.php)
 if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === realpath(__FILE__)) {

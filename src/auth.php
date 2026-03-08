@@ -151,10 +151,10 @@ class Auth
 
         // Need Config to read stored hash — load it without circular dependency
         try {
-            $baseDir = __DIR__;
+            $baseDir = dirname(__DIR__);
             // Config may not be loaded yet; require it if needed
             if (!class_exists('Config', false)) {
-                require_once $baseDir . '/Config.php';
+                require_once __DIR__ . '/Config.php';
             }
             $config = Config::load($baseDir);
         } catch (Exception $e) {

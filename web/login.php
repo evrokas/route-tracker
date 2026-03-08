@@ -5,9 +5,9 @@
  * Default password after fresh install: changeme (set via Settings → General).
  */
 
-$baseDir = __DIR__;
-require_once $baseDir . '/Config.php';
-require_once $baseDir . '/auth.php';
+$baseDir = dirname(__DIR__);
+require_once $baseDir . '/src/Config.php';
+require_once $baseDir . '/src/auth.php';
 
 Auth::startSession();
 

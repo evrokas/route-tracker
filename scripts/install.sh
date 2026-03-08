@@ -5,17 +5,17 @@
 # ═══════════════════════════════════════════════════════════════════
 #
 # Usage:
-#   chmod +x install.sh
-#   sudo ./install.sh                    # Full install to /var/www/route-tracker
-#   sudo ./install.sh /custom/path       # Install to custom directory
-#   sudo ./install.sh --check-only       # Only check dependencies, don't install
+#   chmod +x scripts/install.sh
+#   sudo ./scripts/install.sh                    # Full install to /var/www/route-tracker
+#   sudo ./scripts/install.sh /custom/path       # Install to custom directory
+#   sudo ./scripts/install.sh --check-only       # Only check dependencies, don't install
 #
 # What this script does:
 #   1. Checks system requirements (PHP, extensions, tools)
 #   2. Installs missing PHP extensions (sqlite3, curl)
 #   3. Creates project directory structure
 #   4. Sets file permissions for web server
-#   5. Initializes the SQLite database (php schema.php --init)
+#   5. Initializes the SQLite database (php src/schema.php --init)
 #   6. Generates cron lines
 # ═══════════════════════════════════════════════════════════════════
 
@@ -33,7 +33,7 @@ NC='\033[0m'
 # ─── Defaults ─────────────────────────────────────────────────────────────────
 INSTALL_DIR="${1:-/var/www/route-tracker}"
 CHECK_ONLY=false
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 WEB_USER="www-data"
 WEB_GROUP="www-data"
 PHP_VERSION=""
@@ -243,33 +243,57 @@ else
     success "Created: ${INSTALL_DIR}"
 fi
 
-mkdir -p "${INSTALL_DIR}/data"
-success "Created: ${INSTALL_DIR}/data/"
+mkdir -p "${INSTALL_DIR}/web/css" "${INSTALL_DIR}/web/js" "${INSTALL_DIR}/src" "${INSTALL_DIR}/config" "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/data"
+success "Created directory structure: web/, src/, config/, scripts/, data/"
 
 # ═══════════════════════════════════════════════════════════════════
 header "Step 5: Copying Project Files"
 # ═══════════════════════════════════════════════════════════════════
 
-PHP_FILES=(
-    "Config.php"
-    "AlertManager.php"
-    "DepartureAdvisor.php"
-    "auth.php"
-    "schema.php"
-    "collector.php"
-    "advisor.php"
-    "api.php"
-    "login.php"
-    "dashboard.php"
-    "dashboard.css"
-    "dashboard.js"
-    "settings.php"
-    "settings.js"
-    "settings.css"
-    "README.md"
+# Source files (classes + CLI scripts)
+SRC_FILES=(
+    "src/Config.php"
+    "src/AlertManager.php"
+    "src/DepartureAdvisor.php"
+    "src/auth.php"
+    "src/schema.php"
+    "src/collector.php"
+    "src/advisor.php"
 )
 
-for file in "${PHP_FILES[@]}"; do
+# Web entry points
+WEB_FILES=(
+    "web/api.php"
+    "web/login.php"
+    "web/dashboard.php"
+    "web/settings.php"
+    "web/monitor.php"
+    "web/.htaccess"
+)
+
+# CSS files
+CSS_FILES=(
+    "web/css/dashboard.css"
+    "web/css/settings.css"
+)
+
+# JS files
+JS_FILES=(
+    "web/js/dashboard.js"
+    "web/js/settings.js"
+)
+
+# Config + docs
+OTHER_FILES=(
+    "config/apache.config"
+    "README.md"
+    "CLAUDE.md"
+    ".gitignore"
+)
+
+ALL_FILES=("${SRC_FILES[@]}" "${WEB_FILES[@]}" "${CSS_FILES[@]}" "${JS_FILES[@]}" "${OTHER_FILES[@]}")
+
+for file in "${ALL_FILES[@]}"; do
     src="${SCRIPT_DIR}/${file}"
     dst="${INSTALL_DIR}/${file}"
     if [ -f "$src" ]; then
@@ -281,7 +305,7 @@ for file in "${PHP_FILES[@]}"; do
 done
 
 # Copy install script itself
-cp "$0" "${INSTALL_DIR}/install.sh" 2>/dev/null || true
+cp "$0" "${INSTALL_DIR}/scripts/install.sh" 2>/dev/null || true
 
 # ═══════════════════════════════════════════════════════════════════
 header "Step 6: Setting Permissions"
@@ -293,18 +317,16 @@ chmod 755 "${INSTALL_DIR}"
 # Data directory: web server needs write access
 chmod 775 "${INSTALL_DIR}/data"
 
-# PHP/HTML files: readable
-find "${INSTALL_DIR}" -maxdepth 1 -name "*.php"  -exec chmod 644 {} \;
-find "${INSTALL_DIR}" -maxdepth 1 -name "*.html" -exec chmod 644 {} \;
-find "${INSTALL_DIR}" -maxdepth 1 -name "*.css"  -exec chmod 644 {} \;
-find "${INSTALL_DIR}" -maxdepth 1 -name "*.js"   -exec chmod 644 {} \;
-find "${INSTALL_DIR}" -maxdepth 1 -name "*.md"   -exec chmod 644 {} \;
+# PHP/HTML/CSS/JS files: readable
+find "${INSTALL_DIR}/web" -type f -exec chmod 644 {} \;
+find "${INSTALL_DIR}/src" -type f -exec chmod 644 {} \;
+find "${INSTALL_DIR}" -maxdepth 1 -name "*.md" -exec chmod 644 {} \;
 
 # Executables
-[ -f "${INSTALL_DIR}/install.sh"        ] && chmod 755 "${INSTALL_DIR}/install.sh"
-[ -f "${INSTALL_DIR}/collector.php"     ] && chmod 755 "${INSTALL_DIR}/collector.php"
-[ -f "${INSTALL_DIR}/advisor.php"       ] && chmod 755 "${INSTALL_DIR}/advisor.php"
-[ -f "${INSTALL_DIR}/schema.php"        ] && chmod 755 "${INSTALL_DIR}/schema.php"
+[ -f "${INSTALL_DIR}/scripts/install.sh" ] && chmod 755 "${INSTALL_DIR}/scripts/install.sh"
+[ -f "${INSTALL_DIR}/src/collector.php"  ] && chmod 755 "${INSTALL_DIR}/src/collector.php"
+[ -f "${INSTALL_DIR}/src/advisor.php"    ] && chmod 755 "${INSTALL_DIR}/src/advisor.php"
+[ -f "${INSTALL_DIR}/src/schema.php"     ] && chmod 755 "${INSTALL_DIR}/src/schema.php"
 
 success "Permissions set (owner: ${WEB_USER}:${WEB_GROUP})"
 
@@ -312,14 +334,14 @@ success "Permissions set (owner: ${WEB_USER}:${WEB_GROUP})"
 header "Step 7: Initializing Database"
 # ═══════════════════════════════════════════════════════════════════
 
-if [ -f "${INSTALL_DIR}/schema.php" ]; then
+if [ -f "${INSTALL_DIR}/src/schema.php" ]; then
     cd "${INSTALL_DIR}"
-    php schema.php --init 2>&1 | while IFS= read -r line; do
+    php src/schema.php --init 2>&1 | while IFS= read -r line; do
         echo "    ${line}"
     done
     success "Database initialized (open Settings to configure API key + routes)"
 else
-    warn "schema.php not found — run 'php schema.php --init' manually after copying files"
+    warn "src/schema.php not found — run 'php src/schema.php --init' manually after copying files"
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -329,7 +351,7 @@ header "Step 8: Cron Setup"
 echo ""
 echo "  Add the following cron job (runs advisor + collection every 5 minutes):"
 echo ""
-echo "    */5 * * * * php ${INSTALL_DIR}/advisor.php >> ${INSTALL_DIR}/data/advisor.log 2>&1"
+echo "    */5 * * * * php ${INSTALL_DIR}/src/advisor.php >> ${INSTALL_DIR}/data/advisor.log 2>&1"
 echo ""
 info "Add with: crontab -e"
 
@@ -342,18 +364,18 @@ echo "  Choose one of the following to serve the dashboard:"
 echo ""
 echo -e "  ${BOLD}Option A: PHP Built-in Server (quick test)${NC}"
 echo "    cd ${INSTALL_DIR}"
-echo "    php -S 0.0.0.0:8080"
+echo "    php -S 0.0.0.0:8080 -t web"
 echo "    # Open: http://your-server-ip:8080/login.php"
 echo ""
 echo -e "  ${BOLD}Option B: Apache VirtualHost${NC}"
 cat << APACHE
     <VirtualHost *:80>
         ServerName routes.yourdomain.com
-        DocumentRoot ${INSTALL_DIR}
+        DocumentRoot ${INSTALL_DIR}/web
         DirectoryIndex dashboard.php
 
-        <Directory ${INSTALL_DIR}>
-            AllowOverride None
+        <Directory ${INSTALL_DIR}/web>
+            AllowOverride All
             Require all granted
         </Directory>
 
@@ -372,7 +394,7 @@ cat << NGINX
     server {
         listen 80;
         server_name routes.yourdomain.com;
-        root ${INSTALL_DIR};
+        root ${INSTALL_DIR}/web;
         index dashboard.php;
 
         location ~ \.php$ {
@@ -396,6 +418,7 @@ echo ""
 echo -e "  ${GREEN}${BOLD}Installation complete!${NC}"
 echo ""
 echo "  Project directory: ${INSTALL_DIR}"
+echo "  Web root:          ${INSTALL_DIR}/web"
 echo ""
 echo -e "  ${BOLD}Next steps:${NC}"
 echo ""

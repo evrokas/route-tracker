@@ -4,9 +4,9 @@
  * Multi-tab admin settings UI.
  */
 
-$baseDir = __DIR__;
-require_once $baseDir . '/Config.php';
-require_once $baseDir . '/auth.php';
+$baseDir = dirname(__DIR__);
+require_once $baseDir . '/src/Config.php';
+require_once $baseDir . '/src/auth.php';
 
 Auth::requireLogin();
 
@@ -34,8 +34,8 @@ $currentTz = $config->getTimezone();
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>⚙️ Route Tracker — Settings</title>
-<link rel="stylesheet" href="dashboard.css">
-<link rel="stylesheet" href="settings.css">
+<link rel="stylesheet" href="css/dashboard.css">
+<link rel="stylesheet" href="css/settings.css">
 </head>
 <body>
 
@@ -294,6 +294,6 @@ $currentTz = $config->getTimezone();
 <script>
   const API_BASE = <?= json_encode($apiBase) ?>;
 </script>
-<script src="settings.js"></script>
+<script src="js/settings.js"></script>
 </body>
 </html>

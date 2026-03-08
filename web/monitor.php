@@ -8,8 +8,8 @@
  * JSON:  monitor.php?token=<token>&json=1   (returns current advisor state)
  */
 
-$baseDir = __DIR__;
-require_once $baseDir . '/Config.php';
+$baseDir = dirname(__DIR__);
+require_once $baseDir . '/src/Config.php';
 
 $token  = trim($_GET['token'] ?? '');
 $isJson = !empty($_GET['json']);

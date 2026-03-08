@@ -48,9 +48,9 @@
  *   &day=4   (ISO 1=Mon..7=Sun)
  */
 
-$baseDir = __DIR__;
-require_once $baseDir . '/Config.php';
-require_once $baseDir . '/auth.php';
+$baseDir = dirname(__DIR__);
+require_once $baseDir . '/src/Config.php';
+require_once $baseDir . '/src/auth.php';
 
 // ─── Headers ──────────────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ try {
     jsonError('Server configuration error: ' . $e->getMessage(), 500);
 }
 
-require_once $baseDir . '/auth.php';
+require_once $baseDir . '/src/auth.php';
 Auth::requireLoginOrJson();
 
 $pdo    = $config->getPdo();
@@ -483,8 +483,8 @@ if ($action === 'collections') {
 // ─── advisor_status ───────────────────────────────────────────────────────────
 
 if ($action === 'advisor_status') {
-    require_once $baseDir . '/AlertManager.php';
-    require_once $baseDir . '/DepartureAdvisor.php';
+    require_once $baseDir . '/src/AlertManager.php';
+    require_once $baseDir . '/src/DepartureAdvisor.php';
 
     $alertMgr = new AlertManager($config);
     $advisor  = new DepartureAdvisor($config, $alertMgr);
@@ -732,7 +732,7 @@ if ($action === 'test_collection') {
         jsonError("Route not found: {$rid}", 404);
     }
 
-    require_once $baseDir . '/collector.php';
+    require_once $baseDir . '/src/collector.php';
 
     $params = [
         'origin'         => $route['origin'],
@@ -780,9 +780,9 @@ if ($action === 'test_collection') {
 // ─── run_advisor ─────────────────────────────────────────────────────────────
 
 if ($action === 'run_advisor') {
-    require_once $baseDir . '/AlertManager.php';
-    require_once $baseDir . '/collector.php';
-    require_once $baseDir . '/DepartureAdvisor.php';
+    require_once $baseDir . '/src/AlertManager.php';
+    require_once $baseDir . '/src/collector.php';
+    require_once $baseDir . '/src/DepartureAdvisor.php';
 
     $alertMgr = new AlertManager($config);
     $advisor  = new DepartureAdvisor($config, $alertMgr);
@@ -1017,7 +1017,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ─── channel_profiles_test ───────────────────────────────────────────────
 
     if ($action === 'channel_profiles_test') {
-        require_once $baseDir . '/AlertManager.php';
+        require_once $baseDir . '/src/AlertManager.php';
         $body = getPostData();
         $type = trim($body['type'] ?? '');
         $id   = trim($body['id']   ?? '');
@@ -1068,7 +1068,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // ─── alert_profiles_test ─────────────────────────────────────────────────
 
     if ($action === 'alert_profiles_test') {
-        require_once $baseDir . '/AlertManager.php';
+        require_once $baseDir . '/src/AlertManager.php';
         $body = getPostData();
         $id   = trim($body['id'] ?? '');
 

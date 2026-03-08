@@ -9,11 +9,11 @@
  *   *\/5 * * * * php /var/www/html/apps/tracker/advisor.php >> data/advisor.log 2>&1
  */
 
-$baseDir = __DIR__;
-require_once $baseDir . '/Config.php';
-require_once $baseDir . '/AlertManager.php';
-require_once $baseDir . '/collector.php';      // provides processRoute(), insertTrip(), etc.
-require_once $baseDir . '/DepartureAdvisor.php';
+$baseDir = dirname(__DIR__);
+require_once __DIR__ . '/Config.php';
+require_once __DIR__ . '/AlertManager.php';
+require_once __DIR__ . '/collector.php';      // provides processRoute(), insertTrip(), etc.
+require_once __DIR__ . '/DepartureAdvisor.php';
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
