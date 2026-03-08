@@ -436,8 +436,11 @@ async function toggleAddrPicker(inputId, btn) {
     dropdown.innerHTML = '<div class="addr-empty">No previous addresses found</div>';
   } else {
     dropdown.innerHTML = addresses.map(a =>
-      `<div class="addr-item" onclick="selectAddr('${inputId}', ${JSON.stringify(a)})">${escHtml(a)}</div>`
+      `<div class="addr-item" data-addr="${escHtml(a)}">${escHtml(a)}</div>`
     ).join('');
+    dropdown.querySelectorAll('.addr-item').forEach(el => {
+      el.addEventListener('click', () => selectAddr(inputId, el.dataset.addr));
+    });
   }
 
   dropdown.classList.add('open');
