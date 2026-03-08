@@ -773,6 +773,45 @@ class Config
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Remember-me tokens (multi-device support)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** Store a new remember-me token hash with its expiry unix timestamp. */
+    public function addRememberToken(string $tokenHash, int $expiresAt): void
+    {
+        $this->pdo->prepare(
+            "INSERT OR REPLACE INTO remember_tokens (token_hash, expires_at, created_at)
+             VALUES (?, ?, ?)"
+        )->execute([$tokenHash, $expiresAt, time()]);
+    }
+
+    /** Check if a token hash is valid (exists and not expired). */
+    public function validateRememberToken(string $tokenHash): bool
+    {
+        $st = $this->pdo->prepare(
+            "SELECT 1 FROM remember_tokens WHERE token_hash = ? AND expires_at > ?"
+        );
+        $st->execute([$tokenHash, time()]);
+        return (bool)$st->fetchColumn();
+    }
+
+    /** Delete a single token (used on logout from this device only). */
+    public function deleteRememberToken(string $tokenHash): void
+    {
+        $this->pdo->prepare(
+            "DELETE FROM remember_tokens WHERE token_hash = ?"
+        )->execute([$tokenHash]);
+    }
+
+    /** Delete all expired tokens. Returns count deleted. */
+    public function cleanExpiredRememberTokens(): int
+    {
+        $st = $this->pdo->prepare("DELETE FROM remember_tokens WHERE expires_at <= ?");
+        $st->execute([time()]);
+        return $st->rowCount();
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 

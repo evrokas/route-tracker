@@ -81,17 +81,17 @@ class Auth
     }
 
     /**
-     * Set a 30-day remember-me cookie and persist the token hash in the DB.
+     * Set a 30-day remember-me cookie and store the token hash in the DB.
+     * Each device gets its own row — multiple devices can be remembered simultaneously.
      * Call after a successful password_verify() login.
      */
     public static function setRememberMe(object $config): void
     {
-        $token    = bin2hex(random_bytes(32));   // 64-char hex, cryptographically random
-        $hash     = hash('sha256', $token);
-        $expiry   = time() + self::COOKIE_TTL;
+        $token  = bin2hex(random_bytes(32));   // 64-char hex, cryptographically random
+        $hash   = hash('sha256', $token);
+        $expiry = time() + self::COOKIE_TTL;
 
-        $config->setSetting('remember_token_hash',   $hash);
-        $config->setSetting('remember_token_expiry', (string)$expiry);
+        $config->addRememberToken($hash, $expiry);
 
         setcookie(self::COOKIE_NAME, $token, [
             'expires'  => $expiry,
@@ -103,12 +103,15 @@ class Auth
     }
 
     /**
-     * Clear the remember-me cookie and invalidate the stored token.
+     * Clear the remember-me cookie and delete only this device's token from the DB.
+     * Other devices remain logged in.
      */
     public static function clearRememberMe(object $config): void
     {
-        $config->setSetting('remember_token_hash',   '');
-        $config->setSetting('remember_token_expiry', '0');
+        $token = $_COOKIE[self::COOKIE_NAME] ?? '';
+        if ($token !== '') {
+            $config->deleteRememberToken(hash('sha256', $token));
+        }
 
         setcookie(self::COOKIE_NAME, '', [
             'expires'  => time() - 3600,
@@ -158,20 +161,9 @@ class Auth
             return false;
         }
 
-        $storedHash = $config->getSetting('remember_token_hash', '');
-        $expiry     = (int)$config->getSetting('remember_token_expiry', '0');
+        $hash = hash('sha256', $token);
 
-        if ($storedHash === '' || $expiry === 0) {
-            return false;
-        }
-
-        if (time() > $expiry) {
-            // Token expired — clean up
-            self::clearRememberMe($config);
-            return false;
-        }
-
-        if (!hash_equals($storedHash, hash('sha256', $token))) {
+        if (!$config->validateRememberToken($hash)) {
             return false;
         }
 
