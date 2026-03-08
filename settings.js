@@ -318,12 +318,13 @@ async function showRouteForm(route) {
       </label>
 
       <div class="form-actions">
-        <button class="btn-primary" onclick="saveRoute('${escHtml(r.id || '')}')">Save Route</button>
+        <button class="btn-primary" id="btn-save-route">Save Route</button>
         <button class="btn-secondary" onclick="cancelRouteForm()">Cancel</button>
         <span id="routeFormStatus" class="save-status"></span>
       </div>
     </div>`;
 
+  wrap.querySelector('#btn-save-route').addEventListener('click', () => saveRoute(r.id || ''));
   wrap.scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -544,14 +545,30 @@ function renderChannelProfileTable(type, profiles) {
       <td>${escHtml(p.label)}</td>
       <td>${p.enabled ? 'Yes' : 'No'}</td>
       <td>
-        <button class="btn-tiny" onclick="editChannelProfile('${type}', '${escHtml(p.id)}')">Edit</button>
-        <button class="btn-tiny" onclick="testChannelProfile('${type}', '${escHtml(p.id)}', '${escHtml(p.label)}')">Test</button>
-        <button class="btn-tiny btn-danger" onclick="deleteChannelProfile('${type}', '${escHtml(p.id)}', '${escHtml(p.label)}')">Delete</button>
+        <button class="btn-tiny" data-action="edit-cp" data-id="${escHtml(p.id)}">Edit</button>
+        <button class="btn-tiny" data-action="test-cp" data-id="${escHtml(p.id)}">Test</button>
+        <button class="btn-tiny btn-danger" data-action="delete-cp" data-id="${escHtml(p.id)}">Delete</button>
       </td>
     </tr>`;
   }
   html += '</tbody></table>';
   box.innerHTML = html;
+
+  box.querySelectorAll('[data-action="edit-cp"]').forEach(btn => {
+    btn.addEventListener('click', () => editChannelProfile(type, btn.dataset.id));
+  });
+  box.querySelectorAll('[data-action="test-cp"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = profiles.find(x => x.id === btn.dataset.id);
+      if (p) testChannelProfile(type, p.id, p.label);
+    });
+  });
+  box.querySelectorAll('[data-action="delete-cp"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const p = profiles.find(x => x.id === btn.dataset.id);
+      if (p) deleteChannelProfile(type, p.id, p.label);
+    });
+  });
 }
 
 function addChannelProfile(type) {
@@ -678,12 +695,14 @@ function showChannelProfileForm(type, profile) {
         <input type="checkbox" id="cpf_enabled" ${p.enabled ? 'checked' : ''}> Enabled
       </label>
       <div class="form-actions" style="margin-top:12px">
-        <button class="btn-primary" onclick="saveChannelProfile('${type}', '${escHtml(originalId)}')">Save</button>
-        <button class="btn-secondary" onclick="cancelChannelProfileForm('${type}')">Cancel</button>
+        <button class="btn-primary" id="btn-save-cp">Save</button>
+        <button class="btn-secondary" id="btn-cancel-cp">Cancel</button>
         <span id="cpFormStatus-${type}" class="save-status"></span>
       </div>
     </div>`;
 
+  box.querySelector('#btn-save-cp').addEventListener('click', () => saveChannelProfile(type, originalId));
+  box.querySelector('#btn-cancel-cp').addEventListener('click', () => cancelChannelProfileForm(type));
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
@@ -779,14 +798,30 @@ function renderAlertProfileTable(profiles) {
       <td style="font-size:12px;color:var(--muted)">${escHtml(channels)}</td>
       <td>${ap.enabled ? 'Yes' : 'No'}</td>
       <td>
-        <button class="btn-tiny" onclick="editAlertProfile('${escHtml(ap.id)}')">Edit</button>
-        <button class="btn-tiny" onclick="testAlertProfile('${escHtml(ap.id)}', '${escHtml(ap.label)}')">Test</button>
-        <button class="btn-tiny btn-danger" onclick="deleteAlertProfile('${escHtml(ap.id)}', '${escHtml(ap.label)}')">Delete</button>
+        <button class="btn-tiny" data-action="edit-ap" data-id="${escHtml(ap.id)}">Edit</button>
+        <button class="btn-tiny" data-action="test-ap" data-id="${escHtml(ap.id)}">Test</button>
+        <button class="btn-tiny btn-danger" data-action="delete-ap" data-id="${escHtml(ap.id)}">Delete</button>
       </td>
     </tr>`;
   }
   html += '</tbody></table>';
   box.innerHTML = html;
+
+  box.querySelectorAll('[data-action="edit-ap"]').forEach(btn => {
+    btn.addEventListener('click', () => editAlertProfile(btn.dataset.id));
+  });
+  box.querySelectorAll('[data-action="test-ap"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ap = profiles.find(x => x.id === btn.dataset.id);
+      if (ap) testAlertProfile(ap.id, ap.label);
+    });
+  });
+  box.querySelectorAll('[data-action="delete-ap"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ap = profiles.find(x => x.id === btn.dataset.id);
+      if (ap) deleteAlertProfile(ap.id, ap.label);
+    });
+  });
 }
 
 function addAlertProfile() {
@@ -832,12 +867,13 @@ function showAlertProfileForm(profile) {
         <input type="checkbox" id="apf_enabled" ${ap.enabled ? 'checked' : ''}> Enabled
       </label>
       <div class="form-actions" style="margin-top:12px">
-        <button class="btn-primary" onclick="saveAlertProfile('${escHtml(originalId)}')">Save</button>
+        <button class="btn-primary" id="btn-save-ap">Save</button>
         <button class="btn-secondary" onclick="cancelAlertProfileForm()">Cancel</button>
         <span id="apfStatus" class="save-status"></span>
       </div>
     </div>`;
 
+  box.querySelector('#btn-save-ap').addEventListener('click', () => saveAlertProfile(originalId));
   box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
