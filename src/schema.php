@@ -12,6 +12,8 @@
  */
 
 $baseDir = dirname(__DIR__);
+require_once __DIR__ . '/Config.php';
+Config::loadDeployConfig($baseDir);
 
 $init  = in_array('--init',  $argv ?? [], true);
 $reset = in_array('--reset', $argv ?? [], true);
@@ -23,11 +25,11 @@ if (!$init && !$reset) {
 
 // ─── Data directory + DB path ─────────────────────────────────────────────────
 
-$dbDir  = $baseDir . '/data';
-$dbPath = $dbDir   . '/routes.sqlite';
+$dbDir  = $baseDir . '/' . Config::deploy('data_dir');
+$dbPath = $dbDir   . '/' . Config::deploy('db_filename');
 
 if (!is_dir($dbDir)) {
-    mkdir($dbDir, 0775, true);
+    mkdir($dbDir, Config::deploy('dir_permissions'), true);
     echo "Created directory: {$dbDir}\n";
 }
 

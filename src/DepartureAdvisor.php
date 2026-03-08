@@ -18,7 +18,7 @@ class DepartureAdvisor
         $this->config   = $config;
         $this->pdo      = $config->getPdo();
         $this->alertMgr = $alertMgr;
-        $this->logFile  = $config->getBaseDir() . '/data/advisor.log';
+        $this->logFile  = $config->getBaseDir() . '/' . Config::deploy('data_dir') . '/advisor.log';
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -30,9 +30,11 @@ class DepartureAdvisor
      */
     private function bufferMinutes(float $stddevSec): int
     {
-        if ($stddevSec < 180) return 5;   // <3 min stddev → 5 min buffer
-        if ($stddevSec < 480) return 10;  // <8 min stddev → 10 min buffer
-        return 15;                         // ≥8 min stddev → 15 min buffer
+        $low  = Config::deploy('buffer_stddev_low', 180);
+        $high = Config::deploy('buffer_stddev_high', 480);
+        if ($stddevSec < $low)  return 5;   // low stddev → 5 min buffer
+        if ($stddevSec < $high) return 10;  // medium stddev → 10 min buffer
+        return 15;                           // high stddev → 15 min buffer
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -312,7 +314,7 @@ class DepartureAdvisor
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT        => Config::deploy('curl_timeout', 30),
             CURLOPT_SSL_VERIFYPEER => true,
             CURLOPT_FOLLOWLOCATION => true,
         ]);

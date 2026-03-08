@@ -17,8 +17,9 @@ class AlertManager
     public function __construct(Config $config)
     {
         $this->config    = $config;
-        $this->logFile   = $config->getBaseDir() . '/data/alerts.log';
-        $this->countFile = $config->getBaseDir() . '/data/alert_counts.json';
+        $dataDir         = $config->getBaseDir() . '/' . Config::deploy('data_dir');
+        $this->logFile   = $dataDir . '/alerts.log';
+        $this->countFile = $dataDir . '/alert_counts.json';
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -488,7 +489,7 @@ class AlertManager
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $body,
             CURLOPT_HTTPHEADER     => $headers,
-            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_TIMEOUT        => Config::deploy('curl_timeout_alerts', 15),
             CURLOPT_SSL_VERIFYPEER => true,
         ]);
         $resp  = curl_exec($ch);

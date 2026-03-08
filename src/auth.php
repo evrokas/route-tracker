@@ -15,10 +15,30 @@ class Auth
 {
     private static bool $started = false;
 
-    /** Cookie name for the remember-me token. */
-    private const COOKIE_NAME   = 'rt_remember';
-    /** Token lifetime in seconds (30 days). */
-    private const COOKIE_TTL    = 30 * 24 * 3600;
+    /** @var array|null Cached deploy config for auth */
+    private static ?array $deployCache = null;
+
+    /**
+     * Load deploy config values for auth (cookie name, TTL).
+     * Reads config/settings.php directly to avoid circular Config dependency.
+     */
+    private static function getDeployConfig(): array
+    {
+        if (self::$deployCache === null) {
+            $defaults = [
+                'remember_me_cookie' => 'rt_remember',
+                'remember_me_ttl'    => 30 * 24 * 3600,
+            ];
+            $file = dirname(__DIR__) . '/config/settings.php';
+            if (file_exists($file)) {
+                $user = (array)(require $file);
+                self::$deployCache = array_merge($defaults, $user);
+            } else {
+                self::$deployCache = $defaults;
+            }
+        }
+        return self::$deployCache;
+    }
 
     public static function startSession(): void
     {
@@ -87,13 +107,14 @@ class Auth
      */
     public static function setRememberMe(object $config): void
     {
+        $deploy = self::getDeployConfig();
         $token  = bin2hex(random_bytes(32));   // 64-char hex, cryptographically random
         $hash   = hash('sha256', $token);
-        $expiry = time() + self::COOKIE_TTL;
+        $expiry = time() + $deploy['remember_me_ttl'];
 
         $config->addRememberToken($hash, $expiry);
 
-        setcookie(self::COOKIE_NAME, $token, [
+        setcookie($deploy['remember_me_cookie'], $token, [
             'expires'  => $expiry,
             'path'     => '/',
             'secure'   => isset($_SERVER['HTTPS']),
@@ -108,12 +129,14 @@ class Auth
      */
     public static function clearRememberMe(object $config): void
     {
-        $token = $_COOKIE[self::COOKIE_NAME] ?? '';
+        $deploy     = self::getDeployConfig();
+        $cookieName = $deploy['remember_me_cookie'];
+        $token      = $_COOKIE[$cookieName] ?? '';
         if ($token !== '') {
             $config->deleteRememberToken(hash('sha256', $token));
         }
 
-        setcookie(self::COOKIE_NAME, '', [
+        setcookie($cookieName, '', [
             'expires'  => time() - 3600,
             'path'     => '/',
             'secure'   => isset($_SERVER['HTTPS']),
@@ -144,7 +167,8 @@ class Auth
      */
     private static function checkRememberCookie(): bool
     {
-        $token = $_COOKIE[self::COOKIE_NAME] ?? '';
+        $deploy = self::getDeployConfig();
+        $token  = $_COOKIE[$deploy['remember_me_cookie']] ?? '';
         if ($token === '') {
             return false;
         }

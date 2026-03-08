@@ -24,10 +24,11 @@ try {
     die("[" . date('Y-m-d H:i:s') . "] Config error: " . $e->getMessage() . "\n");
 }
 
-@mkdir($baseDir . '/data', 0775, true);
+$dataDir = $baseDir . '/' . Config::deploy('data_dir');
+@mkdir($dataDir, Config::deploy('dir_permissions'), true);
 
-$logFile  = $baseDir . '/data/advisor.log';
-$collLog  = $baseDir . '/data/collector.log';
+$logFile  = $dataDir . '/advisor.log';
+$collLog  = $dataDir . '/collector.log';
 $pdo      = $config->getPdo();
 $alertMgr = new AlertManager($config);
 $advisor  = new DepartureAdvisor($config, $alertMgr);

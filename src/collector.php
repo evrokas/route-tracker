@@ -54,10 +54,11 @@ function collectorMain(string $baseDir): void
         die("Config error: " . $e->getMessage() . "\n");
     }
 
-    $logFile  = $baseDir . '/data/collector.log';
+    $dataDir  = $baseDir . '/' . Config::deploy('data_dir');
+    $logFile  = $dataDir . '/collector.log';
     $alertMgr = new AlertManager($config);
 
-    @mkdir($baseDir . '/data', 0775, true);
+    @mkdir($dataDir, Config::deploy('dir_permissions'), true);
 
     if ($schedule) {
         printSchedule($config);
@@ -245,7 +246,7 @@ function callApi(string $url): ?string
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_TIMEOUT        => Config::deploy('curl_timeout', 30),
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_FOLLOWLOCATION => true,
     ]);

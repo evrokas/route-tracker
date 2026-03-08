@@ -90,7 +90,7 @@ $routeId = isset($_GET['route_id']) ? trim($_GET['route_id']) : null;
 $year    = isset($_GET['year'])  ? (int)$_GET['year']  : null;
 $month   = isset($_GET['month']) ? (int)$_GET['month'] : null;
 $day     = isset($_GET['day'])   ? (int)$_GET['day']   : null;
-$limit   = isset($_GET['limit']) ? min((int)$_GET['limit'], 500) : 100;
+$limit   = isset($_GET['limit']) ? min((int)$_GET['limit'], Config::deploy('api_max_limit', 500)) : Config::deploy('api_default_limit', 100);
 
 function getPostData(): array
 {
@@ -509,10 +509,11 @@ if ($action === 'get_settings') {
 
 if ($action === 'get_logs') {
     $type   = $_GET['type'] ?? 'collector';
+    $dataDir = $baseDir . '/' . Config::deploy('data_dir');
     $map    = [
-        'collector' => $baseDir . '/data/collector.log',
-        'alerts'    => $baseDir . '/data/alerts.log',
-        'advisor'   => $baseDir . '/data/advisor.log',
+        'collector' => $dataDir . '/collector.log',
+        'alerts'    => $dataDir . '/alerts.log',
+        'advisor'   => $dataDir . '/advisor.log',
     ];
 
     if (!isset($map[$type])) {
@@ -524,7 +525,7 @@ if ($action === 'get_logs') {
 
     if (file_exists($path)) {
         $all   = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
-        $lines = array_slice($all, -50); // last 50 lines
+        $lines = array_slice($all, -Config::deploy('log_tail_lines', 50));
     }
 
     jsonOut(['log' => $lines, 'type' => $type, 'generated_at' => date('c')]);
@@ -786,8 +787,9 @@ if ($action === 'run_advisor') {
 
     $alertMgr = new AlertManager($config);
     $advisor  = new DepartureAdvisor($config, $alertMgr);
-    $logFile  = $baseDir . '/data/advisor.log';
-    $collLog  = $baseDir . '/data/collector.log';
+    $dataDir  = $baseDir . '/' . Config::deploy('data_dir');
+    $logFile  = $dataDir . '/advisor.log';
+    $collLog  = $dataDir . '/collector.log';
 
     $processed = [];
 

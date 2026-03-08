@@ -20,6 +20,27 @@ class Config
     /** @var array[]|null Routes cache */
     private ?array $routesCache = null;
 
+    /** @var array Deployment config from config/settings.php */
+    private static array $deployConfig = [];
+    private static bool  $deployLoaded = false;
+
+    /** Defaults for deploy config (used when config/settings.php is missing or incomplete) */
+    private const DEPLOY_DEFAULTS = [
+        'data_dir'            => 'data',
+        'db_filename'         => 'routes.sqlite',
+        'curl_timeout'        => 30,
+        'curl_timeout_alerts' => 15,
+        'remember_me_cookie'  => 'rt_remember',
+        'remember_me_ttl'     => 2592000, // 30 * 24 * 3600
+        'log_tail_lines'      => 50,
+        'api_default_limit'   => 100,
+        'api_max_limit'       => 500,
+        'dir_permissions'     => 0775,
+        'buffer_stddev_low'   => 180,
+        'buffer_stddev_high'  => 480,
+        'debug'               => false,
+    ];
+
     // Day name → ISO day number (1=Mon .. 7=Sun)
     private const DAY_MAP = [
         'mon' => 1, 'tue' => 2, 'wed' => 3,
@@ -29,6 +50,7 @@ class Config
     private function __construct(string $baseDir)
     {
         $this->baseDir = rtrim($baseDir, '/');
+        self::loadDeployConfig($this->baseDir);
         $this->openDb();
         $this->loadSettings();
     }
@@ -57,6 +79,35 @@ class Config
     public static function reset(): void
     {
         self::$instance = null;
+    }
+
+    /**
+     * Load deployment config from config/settings.php.
+     * Merges with DEPLOY_DEFAULTS so every key is guaranteed to exist.
+     * Safe to call multiple times — only loads once.
+     */
+    public static function loadDeployConfig(string $baseDir): void
+    {
+        if (self::$deployLoaded) {
+            return;
+        }
+        $file = rtrim($baseDir, '/') . '/config/settings.php';
+        $user = file_exists($file) ? (array)(require $file) : [];
+        self::$deployConfig = array_merge(self::DEPLOY_DEFAULTS, $user);
+        self::$deployLoaded = true;
+    }
+
+    /**
+     * Get a deployment config value.
+     * These are environment-level constants from config/settings.php.
+     */
+    public static function deploy(string $key, $default = null)
+    {
+        if (!self::$deployLoaded) {
+            // Fallback: if called before load(), use defaults only
+            return self::DEPLOY_DEFAULTS[$key] ?? $default;
+        }
+        return self::$deployConfig[$key] ?? $default;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -174,7 +225,7 @@ class Config
 
     public function getDbPath(): string
     {
-        return $this->baseDir . '/data/routes.sqlite';
+        return $this->baseDir . '/' . self::deploy('data_dir') . '/' . self::deploy('db_filename');
     }
 
     public function getPdo(): PDO

@@ -38,6 +38,7 @@ tracker/
 │   ├── advisor.php         # CLI cron entry point
 │   └── schema.php          # CLI DB initialization
 ├── config/                 # Configuration templates
+│   ├── settings.php        # Deployment-level constants (paths, timeouts, etc.)
 │   └── apache.config
 ├── scripts/
 │   └── install.sh
@@ -54,8 +55,9 @@ tracker/
 ## Core Architecture
 
 **Configuration Layer**
+- `config/settings.php`: Deployment-level constants (data dir, DB filename, curl timeouts, cookie settings, API limits, debug flag). Optional — defaults apply if missing. Accessed via `Config::deploy('key')`.
 - `src/Config.php`: Singleton backed by SQLite `settings` table; dot-notation getter maps `google_maps.api_key` → key `google_maps_api_key`. No YAML files.
-- All config lives in the database — routes, channel profiles, alert profiles, and global settings.
+- All user-facing config lives in the database — routes, channel profiles, alert profiles, and global settings.
 
 **Data Collection**
 - `src/collector.php`: CLI tool run via cron (or invoked by `src/advisor.php`). Determines active routes based on schedule windows, calls Google Maps Directions API, writes summary rows to `trips` table, evaluates traffic thresholds and fires alerts.
@@ -156,6 +158,7 @@ php -S 0.0.0.0:8080 -t web    # Built-in PHP server for development
 **Config dot-notation**
 - `Config::get('google_maps.api_key')` → looks up key `google_maps_api_key` in settings table
 - `Config::load($baseDir)` (singleton); `Config::reset()` for tests
+- `Config::deploy('key')` → deployment constants from `config/settings.php`
 
 **Alert Logic**
 - Thresholds in settings: `alert_traffic_threshold` (%), `alert_min_samples`, `alert_max_per_day`
