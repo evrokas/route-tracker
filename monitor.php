@@ -174,8 +174,8 @@ body {
   margin: 18px 0;
 }
 
-/* Arrival countdown */
-.arrive-label {
+/* Main countdown (departure) */
+.main-label {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: .08em;
@@ -183,7 +183,7 @@ body {
   margin-bottom: 6px;
 }
 
-.arrive-time-target {
+.main-target {
   font-size: 15px;
   color: var(--muted);
   margin-bottom: 12px;
@@ -207,7 +207,7 @@ body {
   margin-bottom: 0;
 }
 
-/* Departure row */
+/* Details row */
 .dep-row {
   display: flex;
   justify-content: space-between;
@@ -231,15 +231,6 @@ body {
   font-variant-numeric: tabular-nums;
   letter-spacing: -.02em;
 }
-
-.dep-countdown {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 3px;
-  font-variant-numeric: tabular-nums;
-}
-.dep-countdown.urgent  { color: var(--yellow); }
-.dep-countdown.overdue { color: var(--red); }
 
 /* Live estimate */
 .live-row {
@@ -333,10 +324,16 @@ body {
 
   <hr class="divider">
 
-  <div class="arrive-label">Time to arrival</div>
-  <div class="arrive-time-target">Target: <strong><?= htmlspecialchars($arriveTime) ?></strong></div>
-  <div class="countdown" id="arrivalCountdown">--:--:--</div>
-  <div class="countdown-sub" id="arrivalSub"></div>
+  <div class="main-label" id="mainLabel">Leave in</div>
+  <div class="main-target" id="mainTarget">
+    <?php if ($recDep): ?>
+      Depart <strong><?= htmlspecialchars($recDep) ?></strong> · Arrive by <strong><?= htmlspecialchars($arriveTime) ?></strong>
+    <?php else: ?>
+      Arrive by <strong><?= htmlspecialchars($arriveTime) ?></strong>
+    <?php endif; ?>
+  </div>
+  <div class="countdown" id="mainCountdown">--:--:--</div>
+  <div class="countdown-sub" id="mainSub"></div>
 </div>
 
 <div class="card">
@@ -345,10 +342,8 @@ body {
       <div class="dep-label">Recommended departure</div>
       <?php if ($recDep): ?>
         <div class="dep-value" id="depTime"><?= htmlspecialchars($recDep) ?></div>
-        <div class="dep-countdown" id="depCountdown"></div>
       <?php else: ?>
         <div class="no-dep" id="depTime">Calculating…</div>
-        <div class="dep-countdown" id="depCountdown"></div>
       <?php endif; ?>
     </div>
     <?php if ($liveMin !== null): ?>
@@ -426,19 +421,24 @@ function tick() {
   const now     = new Date();
   const toArriv = Math.round((arrivalDt - now) / 1000);
 
-  // Arrival countdown
-  const el = document.getElementById('arrivalCountdown');
-  el.textContent = fmtDuration(toArriv);
-  el.className   = 'countdown' + (toArriv < 0 ? ' overdue' : toArriv < 600 ? ' urgent' : '');
-  document.getElementById('arrivalSub').textContent = fmtRelative(toArriv) + ' until arrival';
+  const countdownEl = document.getElementById('mainCountdown');
+  const subEl       = document.getElementById('mainSub');
+  const targetEl    = document.getElementById('mainTarget');
 
-  // Departure countdown
-  const depEl = document.getElementById('depCountdown');
   if (currentRecDep) {
-    const depDt  = parseLocalTime(DATE, currentRecDep);
-    const toDep  = Math.round((depDt - now) / 1000);
-    depEl.textContent = fmtRelative(toDep) + ' to departure';
-    depEl.className = 'dep-countdown' + (toDep < 0 ? ' overdue' : toDep < 600 ? ' urgent' : '');
+    const depDt = parseLocalTime(DATE, currentRecDep);
+    const toDep = Math.round((depDt - now) / 1000);
+
+    countdownEl.textContent = fmtDuration(toDep);
+    countdownEl.className   = 'countdown' + (toDep < 0 ? ' overdue' : toDep < 300 ? ' urgent' : '');
+    subEl.textContent       = fmtRelative(toArriv) + ' until arrival';
+    targetEl.innerHTML      = `Depart <strong>${currentRecDep}</strong> · Arrive by <strong>${ARRIVE_TIME}</strong>`;
+  } else {
+    // No departure recommendation yet — fall back to arrival countdown
+    countdownEl.textContent = fmtDuration(toArriv);
+    countdownEl.className   = 'countdown' + (toArriv < 0 ? ' overdue' : toArriv < 600 ? ' urgent' : '');
+    subEl.textContent       = fmtRelative(toArriv) + ' until arrival';
+    targetEl.innerHTML      = `Arrive by <strong>${ARRIVE_TIME}</strong> · departure not yet calculated`;
   }
 }
 
@@ -456,6 +456,7 @@ async function refreshState() {
       currentRecDep = data.recommended_departure;
       const depTimeEl = document.getElementById('depTime');
       if (depTimeEl) depTimeEl.textContent = data.recommended_departure;
+      // tick() will update the main target line on the next 1s interval
     }
 
     // Update live min
