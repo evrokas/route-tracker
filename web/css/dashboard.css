@@ -400,6 +400,182 @@ tbody td { padding: 9px 14px; vertical-align: middle; }
 
 .muted-text { color: var(--muted); }
 
+/* ─── Quick Trip Button ─────────────────────────────────────────────────── */
+.quick-trip-btn {
+  background: rgba(251,191,36,.12);
+  border: 1px solid rgba(251,191,36,.35);
+  color: var(--yellow);
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.quick-trip-btn:hover {
+  background: rgba(251,191,36,.22);
+  border-color: var(--yellow);
+}
+
+.qt-cleanup-btn {
+  background: rgba(248,113,113,.1);
+  border: 1px solid rgba(248,113,113,.3);
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.qt-cleanup-btn:hover {
+  background: rgba(248,113,113,.2);
+  border-color: var(--red);
+}
+
+.qt-delete-btn {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  margin-left: 2px;
+  transition: color .15s, background .15s;
+}
+.qt-delete-btn:hover {
+  color: var(--red);
+  background: rgba(248,113,113,.12);
+  border-color: transparent;
+}
+
+/* ─── One-time Trip Badge & Card ────────────────────────────────────────── */
+.badge-one-time {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--yellow);
+  background: rgba(251,191,36,.12);
+  border: 1px solid rgba(251,191,36,.3);
+  border-radius: 999px;
+  padding: 1px 7px;
+  vertical-align: middle;
+  margin-left: 4px;
+  letter-spacing: .03em;
+}
+
+.one-time-card {
+  border-left-color: var(--yellow);
+}
+
+/* ─── Quick Trip Modal ──────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 440px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.5);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.modal-close:hover { color: var(--text); background: var(--card); border-color: transparent; }
+
+.modal-body {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.modal-field label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+.modal-req { color: var(--red); }
+
+.modal-field input,
+.modal-field select {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: var(--font);
+}
+.modal-field input:focus,
+.modal-field select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.modal-footer {
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.modal-error {
+  flex: 1;
+  font-size: 12px;
+  color: var(--red);
+  min-width: 0;
+}
+
 /* ─── Responsive ────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .header  { padding: 10px 14px; }

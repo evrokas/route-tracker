@@ -157,6 +157,28 @@ async function init() {
     });
   });
 
+  // Quick Trip button
+  const btnQt = document.getElementById('btnQuickTrip');
+  if (btnQt) btnQt.addEventListener('click', openQuickTripModal);
+
+  // Clean up expired quick trips
+  const btnCleanup = document.getElementById('btnCleanupTrips');
+  if (btnCleanup) btnCleanup.addEventListener('click', cleanupQuickTrips);
+
+  // Modal close / cancel / submit
+  const btnClose  = document.getElementById('btnCloseModal');
+  const btnCancel = document.getElementById('btnCancelModal');
+  const btnSubmit = document.getElementById('btnSubmitModal');
+  if (btnClose)  btnClose.addEventListener('click',  closeQuickTripModal);
+  if (btnCancel) btnCancel.addEventListener('click', closeQuickTripModal);
+  if (btnSubmit) btnSubmit.addEventListener('click', submitQuickTrip);
+
+  // Close modal on backdrop click
+  const modal = document.getElementById('quickTripModal');
+  if (modal) {
+    modal.addEventListener('click', e => { if (e.target === modal) closeQuickTripModal(); });
+  }
+
   try {
     const d = await api({ action: 'route_list' });
     state.routes = d.routes || [];
@@ -201,12 +223,16 @@ async function render() {
   setStatus('loading');
   updateFilterBadge();
 
-  // Show time chips only on the advisor tab
+  // Show time chips and quick-trip button only on the advisor tab
   const onAdvisor = state.tab === 'advisor';
-  const timeBar = document.getElementById('timeBar');
-  const timeSep = document.getElementById('timeSep');
-  if (timeBar) timeBar.style.display = onAdvisor ? '' : 'none';
-  if (timeSep) timeSep.style.display = onAdvisor ? '' : 'none';
+  const timeBar  = document.getElementById('timeBar');
+  const timeSep  = document.getElementById('timeSep');
+  const quickBar = document.getElementById('quickBar');
+  const quickSep = document.getElementById('quickSep');
+  if (timeBar)  timeBar.style.display  = onAdvisor ? '' : 'none';
+  if (timeSep)  timeSep.style.display  = onAdvisor ? '' : 'none';
+  if (quickBar) quickBar.style.display = onAdvisor ? '' : 'none';
+  if (quickSep) quickSep.style.display = onAdvisor ? '' : 'none';
 
   const box = document.getElementById('content');
   box.innerHTML = '<div class="loading"><div class="spinner"></div>Loading…</div>';
@@ -361,12 +387,20 @@ async function renderAdvisor(box) {
       ? `<a href="${r.monitor_url}" target="_blank" rel="noopener noreferrer" class="card-link" title="Open monitoring page">📊</a>`
       : '';
 
+    const oneTimeBadge = r.one_time
+      ? '<span class="badge-one-time">⚡ one-time</span>'
+      : '';
+
+    const deleteBtn = r.one_time
+      ? `<button class="qt-delete-btn" data-id="${r.route_id}" title="Delete this trip">✕</button>`
+      : '';
+
     html += `
-      <div class="card advisor-card">
+      <div class="card advisor-card${r.one_time ? ' one-time-card' : ''}">
         <div class="card-header">
-          <span class="card-title">${r.route_label}</span>
-          <span class="card-badge badge-arrive">${r.days ? r.days + ' · ' : ''}arrive ${r.arrive_time}</span>
-          ${monitorLink}${gmapsLink(r.origin, r.destination)}
+          <span class="card-title">${r.route_label} ${oneTimeBadge}</span>
+          <span class="card-badge badge-arrive">arrive ${r.arrive_time}</span>
+          ${monitorLink}${gmapsLink(r.origin, r.destination)}${deleteBtn}
         </div>
         <div class="advisor-departure">
           <span class="advisor-leave-label">Leave by</span>
@@ -384,6 +418,27 @@ async function renderAdvisor(box) {
   html += '<div class="empty" style="font-size:12px;margin-top:8px;color:var(--muted)">Updated by advisor.php every 5 min via cron</div>';
 
   box.innerHTML = html;
+
+  // Wire up per-card delete buttons
+  box.querySelectorAll('.qt-delete-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      if (!confirm(`Delete quick trip "${id}"?`)) return;
+      try {
+        const resp = await fetch(`${API_BASE}?action=delete_route`, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+        clearCache(); render();
+      } catch (e) {
+        alert('Delete failed: ' + e.message);
+      }
+    });
+  });
+
   startAdvisorTick();
   startAutoRefresh();
 }
@@ -674,6 +729,135 @@ async function renderHistory(box) {
   }
   html += '</tbody></table></div></div>';
   box.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Quick Trip Modal
+// ═══════════════════════════════════════════════════════════════════════════
+
+async function cleanupQuickTrips() {
+  const btn = document.getElementById('btnCleanupTrips');
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`${API_BASE}?action=cleanup_quick_trips`, {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+    clearCache(); render();
+  } catch (e) {
+    alert('Cleanup failed: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function openQuickTripModal() {
+  const modal = document.getElementById('quickTripModal');
+  if (!modal) return;
+
+  // Default arrive time: now + 30 min, rounded to nearest 5 min
+  const d    = new Date();
+  d.setMinutes(d.getMinutes() + 30);
+  const mins = Math.ceil(d.getMinutes() / 5) * 5;
+  d.setMinutes(mins, 0, 0);
+  const hh   = String(d.getHours()).padStart(2, '0');
+  const mm   = String(d.getMinutes() % 60).padStart(2, '0');
+  document.getElementById('qtArrive').value  = `${hh}:${mm}`;
+  document.getElementById('qtLabel').value   = '';
+  document.getElementById('qtLabel').placeholder = `Quick Trip — ${hh}:${mm}`;
+  document.getElementById('qtDestination').value = '';
+  document.getElementById('qtOrigin').value       = '';
+  document.getElementById('qtError').style.display = 'none';
+
+  // Populate address datalist
+  try {
+    const addrData = await fetch(`${API_BASE}?action=address_history`, { credentials: 'same-origin' });
+    const addrJson = await addrData.json();
+    const dl       = document.getElementById('qtAddressList');
+    dl.innerHTML   = (addrJson.addresses || []).map(a => `<option value="${a.replace(/"/g, '&quot;')}">`).join('');
+  } catch (_) {}
+
+  // Populate alert profiles
+  try {
+    const apData = await fetch(`${API_BASE}?action=alert_profiles_list`, { credentials: 'same-origin' });
+    const apJson = await apData.json();
+    const sel    = document.getElementById('qtAlertProfile');
+    sel.innerHTML = '<option value="">None</option>';
+    (apJson.profiles || []).forEach(p => {
+      if (!p.enabled) return;
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.label;
+      sel.appendChild(opt);
+    });
+  } catch (_) {}
+
+  modal.style.display = 'flex';
+  document.getElementById('qtDestination').focus();
+}
+
+function closeQuickTripModal() {
+  const modal = document.getElementById('quickTripModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitQuickTrip() {
+  const destination = document.getElementById('qtDestination').value.trim();
+  const arrive      = document.getElementById('qtArrive').value.trim();
+  const origin      = document.getElementById('qtOrigin').value.trim();
+  const label       = document.getElementById('qtLabel').value.trim();
+  const alertProf   = document.getElementById('qtAlertProfile').value;
+  const errEl       = document.getElementById('qtError');
+
+  errEl.style.display = 'none';
+
+  if (!destination) {
+    errEl.textContent = 'Destination is required.';
+    errEl.style.display = 'block';
+    document.getElementById('qtDestination').focus();
+    return;
+  }
+  if (!arrive) {
+    errEl.textContent = 'Arrival time is required.';
+    errEl.style.display = 'block';
+    document.getElementById('qtArrive').focus();
+    return;
+  }
+
+  const btnSubmit = document.getElementById('btnSubmitModal');
+  btnSubmit.disabled = true;
+  btnSubmit.textContent = 'Creating…';
+
+  try {
+    const body = { destination, arrive, origin };
+    if (label)     body.label             = label;
+    if (alertProf) body.alert_profile_ids = [alertProf];
+
+    const resp = await fetch(`${API_BASE}?action=create_quick_trip`, {
+      method:      'POST',
+      credentials: 'same-origin',
+      headers:     { 'Content-Type': 'application/json' },
+      body:        JSON.stringify(body),
+    });
+    const data = await resp.json();
+
+    if (!resp.ok || data.error) {
+      throw new Error(data.error || `HTTP ${resp.status}`);
+    }
+
+    closeQuickTripModal();
+    clearCache();
+    render();
+  } catch (e) {
+    errEl.textContent   = e.message;
+    errEl.style.display = 'block';
+  } finally {
+    btnSubmit.disabled    = false;
+    btnSubmit.textContent = 'Create Trip';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

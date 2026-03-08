@@ -31,6 +31,8 @@
  * POST actions (JSON body or form data):
  *   ?action=save_setting          { key, value }  or  { settings: {key:value,...} }
  *   ?action=save_route            { id, label, origin, ... }
+ *   ?action=create_quick_trip     { destination, arrive, origin?, label?, alert_profile_ids? }
+ *   ?action=cleanup_quick_trips   (no body — deletes all expired/inactive one-time routes)
  *   ?action=delete_route          { id }
  *   ?action=change_password       { current, new_password, confirm }
  *   ?action=import_config         { version, settings:{}, routes:[], channel_profiles:{}, alert_profiles:[] }
@@ -946,6 +948,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $config = Config::load($baseDir);
 
         jsonOut(['ok' => true, 'id' => $id, 'created' => !$isUpdate]);
+    }
+
+    // ─── create_quick_trip ────────────────────────────────────────────────────
+
+    if ($action === 'create_quick_trip') {
+        $body = getPostData();
+
+        $destination = trim($body['destination'] ?? '');
+        $arrive      = trim($body['arrive']      ?? '');
+
+        if (!$destination) {
+            jsonError('destination is required', 400);
+        }
+        if (!preg_match('/^\d{2}:\d{2}$/', $arrive)) {
+            jsonError('arrive must be HH:MM', 400);
+        }
+
+        $origin          = trim($body['origin'] ?? '');
+        $label           = trim($body['label']  ?? '') ?: "Quick Trip — {$arrive}";
+        $alertProfileIds = $body['alert_profile_ids'] ?? [];
+
+        // Today's day abbreviation (Mon, Tue, …)
+        $dayAbbr  = date('D');
+        $id       = 'qt_' . time();
+        $now      = date('Y-m-d H:i:s');
+        $schedule = json_encode([['days' => $dayAbbr, 'arrive' => $arrive]]);
+
+        $st = $pdo->prepare("
+            INSERT INTO routes
+                (id, label, origin, destination, travel_mode, schedule,
+                 advisor_enabled, advisor_start_before, advisor_buffer_mode,
+                 advisor_fixed_buffer, advisor_stages, alert_profile_ids,
+                 active, one_time, one_time_used, created_at, updated_at)
+            VALUES
+                (:id, :label, :origin, :destination, 'driving', :schedule,
+                 1, 90, 'auto', 10, :advisor_stages, :alert_profile_ids,
+                 1, 1, 0, :created_at, :updated_at)
+        ");
+        $st->execute([
+            ':id'                => $id,
+            ':label'             => $label,
+            ':origin'            => $origin,
+            ':destination'       => $destination,
+            ':schedule'          => $schedule,
+            ':advisor_stages'    => json_encode(['planning','window','reminder','urgent','last_call']),
+            ':alert_profile_ids' => json_encode(is_array($alertProfileIds) ? $alertProfileIds : []),
+            ':created_at'        => $now,
+            ':updated_at'        => $now,
+        ]);
+
+        Config::reset();
+
+        jsonOut(['ok' => true, 'id' => $id]);
+    }
+
+    // ─── cleanup_quick_trips ──────────────────────────────────────────────────
+    // Deletes all one_time routes that are either expired (one_time_used=1) or
+    // inactive (active=0), plus any qt_* routes regardless of flags (catches
+    // ones created before the one_time column existed).
+
+    if ($action === 'cleanup_quick_trips') {
+        $st = $pdo->prepare("
+            DELETE FROM routes
+            WHERE one_time = 1
+               OR (active = 0 AND id LIKE 'qt_%')
+               OR (active = 1 AND one_time_used = 1)
+        ");
+        $st->execute();
+        $deleted = $st->rowCount();
+
+        Config::reset();
+
+        jsonOut(['ok' => true, 'deleted' => $deleted]);
     }
 
     // ─── delete_route ─────────────────────────────────────────────────────────

@@ -85,6 +85,42 @@ if ($deleted > 0) {
     advisorLog($logFile, "Housekeeping: removed {$deleted} expired monitoring token(s)");
 }
 
+// ─── Deactivate expired one-time routes ───────────────────────────────────────
+
+$windowAfterMin = $config->getCollectionWindowAfter();
+$nowDt          = new DateTime();
+
+try {
+    $expiring = $pdo->query(
+        "SELECT id, schedule FROM routes WHERE one_time = 1 AND active = 1 AND one_time_used = 0"
+    )->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $expiring = [];
+}
+
+foreach ($expiring as $rt) {
+    $schedules = json_decode($rt['schedule'] ?? '[]', true) ?: [];
+    foreach ($schedules as $sched) {
+        if (!isset($sched['arrive'])) {
+            continue;
+        }
+        $parts = explode(':', $sched['arrive']);
+        if (count($parts) < 2) {
+            continue;
+        }
+        $cutoff = new DateTime();
+        $cutoff->setTime((int)$parts[0], (int)$parts[1], 0);
+        $cutoff->modify("+{$windowAfterMin} minutes");
+
+        if ($nowDt >= $cutoff) {
+            $pdo->prepare("UPDATE routes SET active=0, one_time_used=1, updated_at=? WHERE id=?")
+                ->execute([date('Y-m-d H:i:s'), $rt['id']]);
+            advisorLog($logFile, "One-time route '{$rt['id']}' deactivated (window expired)");
+            break;
+        }
+    }
+}
+
 advisorLog($logFile, "Run complete");
 exit(0);
 

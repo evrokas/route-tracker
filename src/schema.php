@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS routes (
     advisor_stages       TEXT    DEFAULT '[\"planning\",\"window\",\"reminder\",\"urgent\",\"last_call\"]',
     alert_profile_ids    TEXT    DEFAULT '[]',
     active               INTEGER DEFAULT 1,
+    one_time             INTEGER DEFAULT 0,
+    one_time_used        INTEGER DEFAULT 0,
     created_at           TEXT,
     updated_at           TEXT
 );
@@ -242,6 +244,20 @@ echo "✓ Table: remember_tokens\n";
 try {
     $pdo->exec("ALTER TABLE routes ADD COLUMN alert_profile_ids TEXT DEFAULT '[]'");
     echo "✓ Migration: added alert_profile_ids to routes\n";
+} catch (Exception $e) {
+    // Column already exists — no action needed
+}
+
+try {
+    $pdo->exec("ALTER TABLE routes ADD COLUMN one_time INTEGER DEFAULT 0");
+    echo "✓ Migration: added one_time to routes\n";
+} catch (Exception $e) {
+    // Column already exists — no action needed
+}
+
+try {
+    $pdo->exec("ALTER TABLE routes ADD COLUMN one_time_used INTEGER DEFAULT 0");
+    echo "✓ Migration: added one_time_used to routes\n";
 } catch (Exception $e) {
     // Column already exists — no action needed
 }

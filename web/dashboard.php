@@ -75,6 +75,51 @@ $apiBase = 'api.php';
     <div class="chip time-chip" data-tw="next3h">Next 3 h</div>
     <div class="chip time-chip" data-tw="next">Next</div>
   </div>
+  <div class="filter-sep" id="quickSep" style="display:none"></div>
+  <div id="quickBar" class="filter-group" style="display:none">
+    <button class="quick-trip-btn" id="btnQuickTrip">⚡ Quick Trip</button>
+    <button class="qt-cleanup-btn" id="btnCleanupTrips" title="Delete all expired / inactive one-time trips">🗑 Clean up</button>
+  </div>
+</div>
+
+<!-- ─── QUICK TRIP MODAL ──────────────────────────────────────────────────── -->
+<div id="quickTripModal" class="modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">⚡ New Quick Trip</span>
+      <button class="modal-close" id="btnCloseModal" aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-field">
+        <label for="qtOrigin">Origin</label>
+        <input type="text" id="qtOrigin" list="qtAddressList" placeholder="Start address (optional)">
+      </div>
+      <div class="modal-field">
+        <label for="qtDestination">Destination <span class="modal-req">*</span></label>
+        <input type="text" id="qtDestination" list="qtAddressList" placeholder="Where are you going?">
+      </div>
+      <div class="modal-field">
+        <label for="qtArrive">Arrive by <span class="modal-req">*</span></label>
+        <input type="time" id="qtArrive">
+      </div>
+      <div class="modal-field">
+        <label for="qtLabel">Label</label>
+        <input type="text" id="qtLabel" placeholder="Quick Trip — 14:30">
+      </div>
+      <div class="modal-field">
+        <label for="qtAlertProfile">Alert Profile</label>
+        <select id="qtAlertProfile">
+          <option value="">None</option>
+        </select>
+      </div>
+      <datalist id="qtAddressList"></datalist>
+    </div>
+    <div class="modal-footer">
+      <div id="qtError" class="modal-error" style="display:none"></div>
+      <button id="btnCancelModal">Cancel</button>
+      <button class="primary" id="btnSubmitModal">Create Trip</button>
+    </div>
+  </div>
 </div>
 
 <!-- ─── TAB BAR ────────────────────────────────────────────────────────── -->
