@@ -166,13 +166,27 @@ function renderRouteList(routes) {
       <td>${profileBadges}</td>
       <td>${r.advisor_enabled ? '✓' : '–'}</td>
       <td>
-        <button class="btn-tiny" onclick='showRouteForm(${JSON.stringify(r).replace(/</g,'&lt;')})'>Edit</button>
-        <button class="btn-tiny btn-danger" onclick="deleteRoute('${escHtml(r.id)}', '${escHtml(r.label)}')">Delete</button>
+        <button class="btn-tiny" data-action="edit-route" data-id="${escHtml(r.id)}">Edit</button>
+        <button class="btn-tiny btn-danger" data-action="delete-route" data-id="${escHtml(r.id)}">Delete</button>
       </td>
     </tr>`;
   }
   html += '</tbody></table></div>';
   box.innerHTML = html;
+
+  // Wire up buttons — avoids any serialisation of route data into HTML attributes
+  box.querySelectorAll('[data-action="edit-route"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const route = routes.find(r => r.id === btn.dataset.id);
+      if (route) showRouteForm(route);
+    });
+  });
+  box.querySelectorAll('[data-action="delete-route"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const route = routes.find(r => r.id === btn.dataset.id);
+      if (route) deleteRoute(route.id, route.label);
+    });
+  });
 }
 
 async function showRouteForm(route) {
