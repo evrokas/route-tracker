@@ -854,6 +854,14 @@ async function openQuickTripModal() {
     });
   } catch (_) {}
 
+  // Auto-insert colon: typing "1430" → "14:30"
+  const arriveInput = document.getElementById('qtArrive');
+  arriveInput.oninput = () => {
+    let v = arriveInput.value.replace(/[^0-9]/g, '');
+    if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2, 4);
+    arriveInput.value = v;
+  };
+
   modal.style.display = 'flex';
   document.getElementById('qtDestination').focus();
 }
@@ -881,8 +889,8 @@ async function submitQuickTrip() {
     document.getElementById('qtDestination').focus();
     return;
   }
-  if (!arrive) {
-    errEl.textContent = 'Arrival time is required.';
+  if (!arrive || !/^\d{2}:\d{2}$/.test(arrive)) {
+    errEl.textContent = 'Enter arrival time as HH:MM (24-hour format).';
     errEl.style.display = 'block';
     document.getElementById('qtArrive').focus();
     return;

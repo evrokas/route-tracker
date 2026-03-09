@@ -108,7 +108,7 @@ $apiBase = 'api.php';
       </div>
       <div class="modal-field">
         <label for="qtArrive">Arrive by <span class="modal-req">*</span></label>
-        <input type="time" id="qtArrive">
+        <input type="text" id="qtArrive" pattern="[0-2][0-9]:[0-5][0-9]" placeholder="HH:MM" maxlength="5" inputmode="numeric">
       </div>
       <div class="modal-field">
         <label for="qtLabel">Label</label>
