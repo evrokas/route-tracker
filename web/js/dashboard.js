@@ -754,6 +754,69 @@ async function cleanupQuickTrips() {
   }
 }
 
+// ── Address picker helpers for the Quick Trip modal ──────────────────────────
+
+let _qtAddrCache = null;
+
+async function _fetchQtAddresses() {
+  if (_qtAddrCache !== null) return _qtAddrCache;
+  try {
+    const resp = await fetch(`${API_BASE}?action=address_history`, { credentials: 'same-origin' });
+    const data = await resp.json();
+    _qtAddrCache = data.addresses || [];
+  } catch (_) {
+    _qtAddrCache = [];
+  }
+  return _qtAddrCache;
+}
+
+function closeQtAddrDropdowns() {
+  document.querySelectorAll('#quickTripModal .addr-dropdown').forEach(d => {
+    d.classList.remove('open');
+    d.innerHTML = '';
+  });
+}
+
+async function toggleQtAddrPicker(inputId, btn) {
+  const dropdown = document.getElementById('dp_' + inputId);
+  if (!dropdown) return;
+
+  if (dropdown.classList.contains('open')) {
+    dropdown.classList.remove('open');
+    dropdown.innerHTML = '';
+    return;
+  }
+
+  closeQtAddrDropdowns();
+
+  const addresses = await _fetchQtAddresses();
+
+  if (!addresses.length) {
+    dropdown.innerHTML = '<div class="addr-empty">No previous addresses found</div>';
+  } else {
+    dropdown.innerHTML = addresses
+      .map(a => `<div class="addr-item" onclick="selectQtAddr('${inputId}', this.dataset.addr)" data-addr="${a.replace(/"/g, '&quot;')}">${a.replace(/</g, '&lt;')}</div>`)
+      .join('');
+  }
+
+  dropdown.classList.add('open');
+
+  const onOutside = e => {
+    if (!dropdown.contains(e.target) && e.target !== btn) {
+      dropdown.classList.remove('open');
+      dropdown.innerHTML = '';
+      document.removeEventListener('click', onOutside);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', onOutside), 0);
+}
+
+function selectQtAddr(inputId, address) {
+  const input = document.getElementById(inputId);
+  if (input) input.value = address;
+  closeQtAddrDropdowns();
+}
+
 async function openQuickTripModal() {
   const modal = document.getElementById('quickTripModal');
   if (!modal) return;
@@ -771,14 +834,10 @@ async function openQuickTripModal() {
   document.getElementById('qtDestination').value = '';
   document.getElementById('qtOrigin').value       = '';
   document.getElementById('qtError').style.display = 'none';
+  closeQtAddrDropdowns();
 
-  // Populate address datalist
-  try {
-    const addrData = await fetch(`${API_BASE}?action=address_history`, { credentials: 'same-origin' });
-    const addrJson = await addrData.json();
-    const dl       = document.getElementById('qtAddressList');
-    dl.innerHTML   = (addrJson.addresses || []).map(a => `<option value="${a.replace(/"/g, '&quot;')}">`).join('');
-  } catch (_) {}
+  // Pre-fetch address list so the ▾ buttons respond instantly
+  _fetchQtAddresses();
 
   // Populate alert profiles
   try {
@@ -802,6 +861,8 @@ async function openQuickTripModal() {
 function closeQuickTripModal() {
   const modal = document.getElementById('quickTripModal');
   if (modal) modal.style.display = 'none';
+  closeQtAddrDropdowns();
+  _qtAddrCache = null; // refresh on next open in case new routes were added
 }
 
 async function submitQuickTrip() {

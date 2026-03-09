@@ -92,11 +92,19 @@ $apiBase = 'api.php';
     <div class="modal-body">
       <div class="modal-field">
         <label for="qtOrigin">Origin</label>
-        <input type="text" id="qtOrigin" list="qtAddressList" placeholder="Start address (optional)">
+        <div class="addr-wrap">
+          <input type="text" id="qtOrigin" autocomplete="off" placeholder="Start address (optional)">
+          <button type="button" class="addr-pick-btn" title="Pick from previous addresses" onclick="toggleQtAddrPicker('qtOrigin', this)">▾</button>
+          <div class="addr-dropdown" id="dp_qtOrigin"></div>
+        </div>
       </div>
       <div class="modal-field">
         <label for="qtDestination">Destination <span class="modal-req">*</span></label>
-        <input type="text" id="qtDestination" list="qtAddressList" placeholder="Where are you going?">
+        <div class="addr-wrap">
+          <input type="text" id="qtDestination" autocomplete="off" placeholder="Where are you going?">
+          <button type="button" class="addr-pick-btn" title="Pick from previous addresses" onclick="toggleQtAddrPicker('qtDestination', this)">▾</button>
+          <div class="addr-dropdown" id="dp_qtDestination"></div>
+        </div>
       </div>
       <div class="modal-field">
         <label for="qtArrive">Arrive by <span class="modal-req">*</span></label>
@@ -112,7 +120,6 @@ $apiBase = 'api.php';
           <option value="">None</option>
         </select>
       </div>
-      <datalist id="qtAddressList"></datalist>
     </div>
     <div class="modal-footer">
       <div id="qtError" class="modal-error" style="display:none"></div>
