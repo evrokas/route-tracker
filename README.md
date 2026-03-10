@@ -9,6 +9,16 @@ All configuration is stored in SQLite — no YAML files required.
 
 ---
 
+## Features
+
+- **Departure Advisor** — tells you what time to leave to arrive by a target time, accounting for live traffic and historical variance
+- **Quick Trips** — create one-time advisor routes directly from the dashboard for ad-hoc journeys; auto-deactivate once the trip window passes
+- **Multi-channel alerts** — Telegram, Email, Signal, Viber
+- **Statistics dashboard** — overview, best routes by day, trends, history
+- **Scheduled collection** — single cron job handles both data collection and advisor logic
+
+---
+
 ## Directory Structure
 
 ```
@@ -35,6 +45,7 @@ tracker/
 │   ├── advisor.php         # CLI cron entry point
 │   └── schema.php          # CLI DB initialization
 ├── config/                 # Configuration templates
+│   ├── settings.php        # Deployment-level constants (optional, has defaults)
 │   └── apache.config       # Apache vhost example
 ├── scripts/                # Utility scripts
 │   └── install.sh          # Automated installer
@@ -86,6 +97,32 @@ php -S 0.0.0.0:8080 -t web
 | PHP extensions | `curl`, `sqlite3` (no PECL yaml needed) |
 | Web server | Apache or Nginx (or PHP built-in) |
 | Cron | For scheduled collection |
+
+---
+
+## Dashboard
+
+The dashboard has six tabs, with the layout (top → bottom):
+**header** → **tab bar** → **route/time filter chips** → **content**
+
+| Tab | Description |
+|-----|-------------|
+| **Advisor** | Live departure recommendations per route. Shows recommended leave-by time, countdown, and alert stages fired. |
+| **Overview** | Average, best, and worst travel times per route. |
+| **Best Routes** | Best road/alternative per route per day of week. |
+| **By Day** | Average durations broken down by day of week. |
+| **Trends** | Timeline and monthly charts. |
+| **History** | Last 100 collections with route and status detail. |
+
+### Quick Trips
+
+The `⚡ Quick Trip` split button in the header lets you create a one-time
+advisor route for an ad-hoc journey:
+
+1. Click `⚡ Quick Trip` → fill in destination, origin (optional), and arrive-by time (HH:MM, 24-hour)
+2. The trip appears on the **Advisor** tab immediately with a yellow `⚡ one-time` badge
+3. It auto-deactivates after the arrival window passes (handled by the next cron run)
+4. Delete it manually with the `✕` button on its card, or bulk-remove all expired ones via `▾ → 🗑 Clean up expired`
 
 ---
 
@@ -145,13 +182,13 @@ server {
 | `php src/collector.php --force --route=dad_work` | Force one specific route |
 | `php src/collector.php --test` | API call + show results, don't save |
 | `php src/collector.php --schedule` | Print schedule + cron lines |
-| `php src/advisor.php` | Manual advisor run |
+| `php src/advisor.php` | Manual advisor run (also deactivates expired Quick Trips) |
 
 ---
 
 ## Cron Setup
 
-Single cron job handles both advisor and collection:
+Single cron job handles advisor checks, data collection, and Quick Trip cleanup:
 
 ```
 */5 * * * * php /path/to/tracker/src/advisor.php >> /path/to/tracker/data/advisor.log 2>&1

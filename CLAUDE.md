@@ -10,6 +10,7 @@ Route Tracker v3 is a PHP-based system that:
 - Identifies the best routes per day/time/season
 - Sends alerts via email, Telegram, Viber, or Signal when traffic is heavy or better alternatives exist
 - Runs a Departure Advisor that tells users what time to leave to arrive by a target time
+- Supports **Quick Trips** — one-time advisor routes created from the dashboard for ad-hoc journeys
 - Provides a web dashboard and a web-based admin settings UI
 
 ## Directory Structure
@@ -67,8 +68,16 @@ tracker/
 
 **Departure Advisor**
 - `src/DepartureAdvisor.php`: Core class. Loads historical avg/stddev from `trips`, calls the Directions API live, calculates recommended departure time with a variance-based or fixed buffer, determines which alert stage is due, and dispatches via `AlertManager`.
-- `src/advisor.php`: Cron entry point (every 5 min). Iterates advisor-enabled routes, runs `DepartureAdvisor`, and triggers collection for routes in window. Single cron replaces separate collector + advisor jobs.
+- `src/advisor.php`: Cron entry point (every 5 min). Iterates advisor-enabled routes, runs `DepartureAdvisor`, triggers collection for routes in window, and auto-deactivates expired one-time routes. Single cron replaces separate collector + advisor jobs.
 - Advisor stages: `planning` (60–90 min to arrival), `window` (30–60 min), `reminder` (10–30 min to departure), `urgent` (0–10 min), `last_call` (−5–0 min).
+
+**Quick Trips**
+- One-time advisor routes created directly from the dashboard for ad-hoc journeys (e.g. a single trip to the dentist).
+- Stored as regular routes with `one_time = 1`. Schedule contains today's day abbreviation + target arrival time.
+- The cron (`advisor.php`) auto-deactivates them once `arrive_time + window_after_minutes` has passed by setting `active = 0` and `one_time_used = 1`.
+- API actions: `create_quick_trip` (POST), `cleanup_quick_trips` (POST — bulk-deletes all expired/inactive one-time routes).
+- Dashboard: `⚡ Quick Trip` split button in the header. `▾` reveals a dropdown with "🗑 Clean up expired". One-time advisor cards show a yellow `⚡ one-time` badge and a `✕` delete button.
+- IDs are auto-generated as `qt_<unix_timestamp>`.
 
 **Alerting System — Two-Tier Profile Model**
 - **Channel profiles**: Named credential sets per channel type (`telegram_profiles`, `email_profiles`, `signal_profiles`, `viber_profiles` tables).
@@ -78,25 +87,25 @@ tracker/
 - Two alert types: heavy traffic (`current > avg × (1 + threshold%)`), better alternative (>2 min savings). Rate-limited via `alert_counts.json`.
 
 **Web Interface**
-- `web/dashboard.php`: Session-authenticated HTML entry point (loads `js/dashboard.js` / `css/dashboard.css`).
-- `web/api.php`: REST API; all data queries on `trips` table. Actions: `route_list`, `overview`, `by_day`, `by_month`, `timeline`, `best_routes`, `trips`, `advisor_status`, `get_settings`, `save_setting`, `save_route`, `delete_route`, `test_collection`, `run_advisor`, `db_stats`, `get_logs`, `export_trips`, `export_config`, `import_config`, `change_password`, `address_history`, `channel_profiles_list`, `channel_profiles_save`, `channel_profiles_delete`, `channel_profiles_test`, `alert_profiles_list`, `alert_profiles_save`, `alert_profiles_delete`, `alert_profiles_test`.
-- `web/js/dashboard.js`: Vanilla JS client; tabs: Advisor (default), Overview, By Day, Trends, History.
+- `web/dashboard.php`: Session-authenticated HTML entry point. Layout (top → bottom): header (with Quick Trip split button) → tab bar → route/time chips filter bar → content area.
+- `web/api.php`: REST API; all data queries on `trips` table. Actions: `route_list`, `overview`, `by_day`, `by_month`, `timeline`, `best_routes`, `collections`, `advisor_status`, `get_settings`, `save_setting`, `save_route`, `create_quick_trip`, `cleanup_quick_trips`, `delete_route`, `test_collection`, `run_advisor`, `db_stats`, `get_logs`, `export_trips`, `export_config`, `import_config`, `change_password`, `address_history`, `channel_profiles_list`, `channel_profiles_save`, `channel_profiles_delete`, `channel_profiles_test`, `alert_profiles_list`, `alert_profiles_save`, `alert_profiles_delete`, `alert_profiles_test`.
+- `web/js/dashboard.js`: Vanilla JS client; tabs: Advisor (default), Overview, Best Routes, By Day, Trends, History. Includes Quick Trip modal logic and addr-picker helpers.
 - `web/settings.php` + `web/js/settings.js` + `web/css/settings.css`: 4-tab admin UI — General, Routes, Alerts, System.
-- `src/auth.php`: Session-based authentication (unchanged).
+- `src/auth.php`: Session-based authentication.
 - `web/login.php`: Uses `password_verify()` against hash stored in `settings` table.
 - Google Maps navigation URL format: `https://www.google.com/maps/dir/?api=1&origin=<origin>&destination=<destination>&travelmode=driving`
 - All API calls require an active session; no tokens in URLs.
 
 **Database**
 - SQLite with WAL mode; path: `data/routes.sqlite` relative to project root.
-- `src/schema.php`: Creates 9 tables; `--init` seeds default settings (safe to re-run); `--reset` drops all and re-creates.
+- `src/schema.php`: Creates 11 tables; `--init` seeds default settings (safe to re-run); `--reset` drops all and re-creates.
 
 ### Tables
 
 | Table | Purpose |
 |-------|---------|
 | `settings` | Key/value store for all global config |
-| `routes` | Route definitions (schedule JSON, advisor config, `alert_profile_ids`) |
+| `routes` | Route definitions (schedule JSON, advisor config, `alert_profile_ids`, `one_time`, `one_time_used`) |
 | `trips` | Lean per-trip stats (no raw JSON, no step data) |
 | `advisor_state` | Stage tracking per route/schedule/date |
 | `telegram_profiles` | Telegram channel credential sets |
@@ -104,6 +113,17 @@ tracker/
 | `signal_profiles` | Signal CLI/API credential sets |
 | `viber_profiles` | Viber bot credential sets |
 | `alert_profiles` | Bundles of channel profile bindings |
+| `monitoring_tokens` | Short-lived tokens for the public monitor page |
+| `remember_tokens` | Remember-me cookie tokens |
+
+### routes table — notable columns
+
+| Column | Type | Notes |
+|--------|------|-------|
+| `active` | INTEGER | 0 = disabled; 1 = active |
+| `one_time` | INTEGER | 1 = Quick Trip (single-use route) |
+| `one_time_used` | INTEGER | 1 = already expired/deactivated by advisor |
+| `schedule` | TEXT | JSON array of `{days, arrive}` or `{days, depart}` entries. `days` must use named values (`Mon`, `Weekdays`, etc.) — date-keyed entries are not supported and will be ignored. |
 
 ## Development Commands
 
@@ -149,6 +169,11 @@ php -S 0.0.0.0:8080 -t web    # Built-in PHP server for development
 - Groups: `Weekdays` (Mon–Fri), `Weekends` (Sat–Sun), `All` (Mon–Sun)
 - Schedule entries: `{ days, arrive }` or `{ days, depart }` stored as JSON in `routes.schedule`
 - Advisor only acts on `arrive`-mode schedule entries
+- Quick Trips use today's `date('D')` abbreviation (e.g. `Mon`) as their `days` value
+
+**Time Inputs**
+- All HH:MM inputs (schedule entries and Quick Trip arrive time) use `type="text"` with `pattern="[0-2][0-9]:[0-5][0-9]"` to guarantee 24-hour display regardless of browser locale
+- Auto-colon insertion: typing `1430` becomes `14:30` via `autoColonTime(input)` (present in both `dashboard.js` and `settings.js`)
 
 **Authentication**
 - Session-based; password hash stored in `settings` table under key `dashboard_password_hash`
@@ -183,9 +208,15 @@ COALESCE(SQRT(AVG(col*col) - AVG(col)*AVG(col)), 0)
 
 ## Common Patterns
 
-**Adding/Editing Routes**
+**Adding/Editing Recurring Routes**
 - Use Settings → Routes in the web UI, or POST to `web/api.php?action=save_route`
 - Test collection: Settings → System → Run Collection Now (or `php src/collector.php --test --route=<id>`)
+
+**Creating a Quick Trip (one-time)**
+- Dashboard header → `⚡ Quick Trip` button → fill in destination, origin (optional), arrive-by time
+- The trip appears immediately on the Advisor tab with a yellow `⚡ one-time` badge
+- It auto-deactivates after the arrival window passes (next cron run after `arrive + window_after_minutes`)
+- To delete manually: click `✕` on the advisor card, or use `▾ → 🗑 Clean up expired` to bulk-remove all expired ones
 
 **Setting Up Alerts**
 1. Settings → Alerts → Channel Profiles: add a Telegram/Email/Signal/Viber profile with credentials
