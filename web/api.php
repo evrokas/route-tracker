@@ -1109,16 +1109,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // ─── cleanup_quick_trips ──────────────────────────────────────────────────
-    // Deletes all one_time routes that are either expired (one_time_used=1) or
-    // inactive (active=0), plus any qt_* routes regardless of flags (catches
-    // ones created before the one_time column existed).
+    // Deletes one_time routes that are expired (one_time_used=1) or inactive
+    // (active=0). Also catches legacy qt_* routes (predating the one_time column)
+    // that are inactive. Active, unexpired quick trips are NOT deleted.
 
     if ($action === 'cleanup_quick_trips') {
         $st = $pdo->prepare("
             DELETE FROM routes
-            WHERE one_time = 1
+            WHERE (one_time = 1 AND (one_time_used = 1 OR active = 0))
                OR (active = 0 AND id LIKE 'qt_%')
-               OR (active = 1 AND one_time_used = 1)
         ");
         $st->execute();
         $deleted = $st->rowCount();

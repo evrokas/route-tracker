@@ -451,6 +451,7 @@ class DepartureAdvisor
                     'arrive_time'           => $arriveTime,
                     'days'                  => $sched['days'] ?? '',
                     'runs_today'            => $runsToday,
+                    'one_time'              => !empty($route['one_time']),
                     'recommended_departure' => $recDep,
                     'live_duration_seconds' => $state['live_duration_seconds'] ?? null,
                     'stages_fired'          => $state['stages_fired'] ?? [],
