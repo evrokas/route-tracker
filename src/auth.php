@@ -66,11 +66,17 @@ class Auth
         self::startSession();
 
         if (!empty($_SESSION['rt_authed'])) {
+            if (empty($_SESSION['csrf_token'])) {
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            }
             return;
         }
 
         // Try remember-me cookie
         if (self::checkRememberCookie()) {
+            if (empty($_SESSION['csrf_token'])) {
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            }
             return;
         }
 
@@ -87,10 +93,16 @@ class Auth
         self::startSession();
 
         if (!empty($_SESSION['rt_authed'])) {
+            if (empty($_SESSION['csrf_token'])) {
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            }
             return;
         }
 
         if (self::checkRememberCookie()) {
+            if (empty($_SESSION['csrf_token'])) {
+                $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+            }
             return;
         }
 
@@ -98,6 +110,21 @@ class Auth
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['error' => 'Session expired. Please log in again.', 'login_url' => 'login.php']);
         exit;
+    }
+
+    public static function getCsrfToken(): string
+    {
+        return $_SESSION['csrf_token'] ?? '';
+    }
+
+    public static function verifyCsrfToken(): void
+    {
+        $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+        if (!hash_equals($_SESSION['csrf_token'] ?? '', $token)) {
+            http_response_code(403);
+            echo json_encode(['error' => 'CSRF token invalid']);
+            exit;
+        }
     }
 
     /**

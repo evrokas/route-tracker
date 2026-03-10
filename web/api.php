@@ -104,6 +104,17 @@ function getPostData(): array
     return $_POST ?: [];
 }
 
+function verifyCsrf(): void
+{
+    $token    = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    $expected = $_SESSION['csrf_token'] ?? '';
+    if (!$expected || !hash_equals($expected, $token)) {
+        http_response_code(403);
+        echo json_encode(['error' => 'CSRF token missing or invalid']);
+        exit;
+    }
+}
+
 function validateEnum(mixed $value, array $allowed, string $default): string
 {
     return in_array($value, $allowed, true) ? (string)$value : $default;
@@ -676,6 +687,7 @@ if ($action === 'export_config') {
 // ─── import_config ────────────────────────────────────────────────────────────
 
 if ($action === 'import_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrf();
     $body = json_decode(file_get_contents('php://input'), true);
 
     if (!is_array($body) || ($body['version'] ?? 0) !== 3) {
@@ -866,6 +878,7 @@ if ($action === 'run_advisor') {
 // ═════════════════════════════════════════════════════════════════════════════
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verifyCsrf();
 
     // ─── save_setting ─────────────────────────────────────────────────────────
 
@@ -907,6 +920,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $hash = password_hash($newPw, PASSWORD_DEFAULT);
         $config->setSetting('dashboard_password_hash', $hash);
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
         jsonOut(['ok' => true]);
     }
 

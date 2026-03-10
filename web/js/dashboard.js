@@ -1,4 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
+// CSRF
+// ═══════════════════════════════════════════════════════════════════════════
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+
+function apiFetch(url, opts = {}) {
+  opts.headers = { ...(opts.headers ?? {}), 'X-CSRF-Token': CSRF_TOKEN };
+  return fetch(url, opts);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════════════════════════════════════
 let state = {
@@ -434,7 +444,7 @@ async function renderAdvisor(box) {
       const id = btn.dataset.id;
       if (!confirm(`Delete quick trip "${id}"?`)) return;
       try {
-        const resp = await fetch(`${API_BASE}?action=delete_route`, {
+        const resp = await apiFetch(`${API_BASE}?action=delete_route`, {
           method: 'POST', credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id }),
@@ -753,7 +763,7 @@ async function cleanupQuickTrips() {
   const btn = document.getElementById('btnCleanupTrips');
   btn.disabled = true;
   try {
-    const resp = await fetch(`${API_BASE}?action=cleanup_quick_trips`, {
+    const resp = await apiFetch(`${API_BASE}?action=cleanup_quick_trips`, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: '{}',
@@ -919,7 +929,7 @@ async function submitQuickTrip() {
     if (label)     body.label             = label;
     if (alertProf) body.alert_profile_ids = [alertProf];
 
-    const resp = await fetch(`${API_BASE}?action=create_quick_trip`, {
+    const resp = await apiFetch(`${API_BASE}?action=create_quick_trip`, {
       method:      'POST',
       credentials: 'same-origin',
       headers:     { 'Content-Type': 'application/json' },

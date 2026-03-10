@@ -2,6 +2,11 @@
 // AJAX handlers for the settings admin UI
 
 // ═══════════════════════════════════════════════════════════════════════════
+// CSRF
+// ═══════════════════════════════════════════════════════════════════════════
+const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]')?.content ?? '';
+
+// ═══════════════════════════════════════════════════════════════════════════
 // API helper
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -16,7 +21,7 @@ async function apiPost(action, body = {}) {
   const resp = await fetch(`${API_BASE}?action=${action}`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF_TOKEN },
     body: JSON.stringify(body),
   });
   if (resp.status === 401) { window.location.href = 'login.php'; return null; }
