@@ -754,6 +754,12 @@ async function cleanupQuickTrips() {
   }
 }
 
+function autoColonTime(input) {
+  let v = input.value.replace(/[^0-9]/g, '');
+  if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2, 4);
+  input.value = v;
+}
+
 // ── Address picker helpers for the Quick Trip modal ──────────────────────────
 
 let _qtAddrCache = null;
@@ -854,13 +860,7 @@ async function openQuickTripModal() {
     });
   } catch (_) {}
 
-  // Auto-insert colon: typing "1430" → "14:30"
-  const arriveInput = document.getElementById('qtArrive');
-  arriveInput.oninput = () => {
-    let v = arriveInput.value.replace(/[^0-9]/g, '');
-    if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2, 4);
-    arriveInput.value = v;
-  };
+  document.getElementById('qtArrive').oninput = function() { autoColonTime(this); };
 
   modal.style.display = 'flex';
   document.getElementById('qtDestination').focus();

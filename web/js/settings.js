@@ -340,9 +340,15 @@ function buildSchedRow(s, idx) {
       <option value="arrive" ${mode==='arrive'?'selected':''}>arrive by</option>
       <option value="depart" ${mode==='depart'?'selected':''}>depart at</option>
     </select>
-    <input type="text" class="sched-time" value="${escHtml(time)}" placeholder="HH:MM" maxlength="5" pattern="\\d{2}:\\d{2}">
+    <input type="text" class="sched-time" value="${escHtml(time)}" placeholder="HH:MM" maxlength="5" pattern="\\d{2}:\\d{2}" oninput="autoColonTime(this)">
     <button class="btn-tiny btn-danger" onclick="this.closest('.sched-row').remove()">−</button>
   </div>`;
+}
+
+function autoColonTime(input) {
+  let v = input.value.replace(/[^0-9]/g, '');
+  if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2, 4);
+  input.value = v;
 }
 
 function addSchedRow() {
