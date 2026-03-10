@@ -157,13 +157,26 @@ async function init() {
     });
   });
 
-  // Quick Trip button
-  const btnQt = document.getElementById('btnQuickTrip');
-  if (btnQt) btnQt.addEventListener('click', openQuickTripModal);
-
-  // Clean up expired quick trips
+  // Quick Trip split button
+  const btnQt      = document.getElementById('btnQuickTrip');
+  const btnQtMenu  = document.getElementById('btnQtMenu');
+  const qtMenu     = document.getElementById('qtMenu');
   const btnCleanup = document.getElementById('btnCleanupTrips');
-  if (btnCleanup) btnCleanup.addEventListener('click', cleanupQuickTrips);
+
+  if (btnQt)     btnQt.addEventListener('click', openQuickTripModal);
+  if (btnCleanup) btnCleanup.addEventListener('click', () => { closeQtMenu(); cleanupQuickTrips(); });
+
+  if (btnQtMenu && qtMenu) {
+    btnQtMenu.addEventListener('click', e => {
+      e.stopPropagation();
+      const open = qtMenu.style.display !== 'none';
+      qtMenu.style.display = open ? 'none' : 'block';
+    });
+    document.addEventListener('click', e => {
+      const split = document.getElementById('qtSplit');
+      if (split && !split.contains(e.target)) qtMenu.style.display = 'none';
+    });
+  }
 
   // Modal close / cancel / submit
   const btnClose  = document.getElementById('btnCloseModal');
@@ -223,16 +236,12 @@ async function render() {
   setStatus('loading');
   updateFilterBadge();
 
-  // Show time chips and quick-trip button only on the advisor tab
+  // Show time chips only on the advisor tab
   const onAdvisor = state.tab === 'advisor';
-  const timeBar  = document.getElementById('timeBar');
-  const timeSep  = document.getElementById('timeSep');
-  const quickBar = document.getElementById('quickBar');
-  const quickSep = document.getElementById('quickSep');
-  if (timeBar)  timeBar.style.display  = onAdvisor ? '' : 'none';
-  if (timeSep)  timeSep.style.display  = onAdvisor ? '' : 'none';
-  if (quickBar) quickBar.style.display = onAdvisor ? '' : 'none';
-  if (quickSep) quickSep.style.display = onAdvisor ? '' : 'none';
+  const timeBar = document.getElementById('timeBar');
+  const timeSep = document.getElementById('timeSep');
+  if (timeBar) timeBar.style.display = onAdvisor ? '' : 'none';
+  if (timeSep) timeSep.style.display = onAdvisor ? '' : 'none';
 
   const box = document.getElementById('content');
   box.innerHTML = '<div class="loading"><div class="spinner"></div>Loading…</div>';
@@ -734,6 +743,11 @@ async function renderHistory(box) {
 // ═══════════════════════════════════════════════════════════════════════════
 // Quick Trip Modal
 // ═══════════════════════════════════════════════════════════════════════════
+
+function closeQtMenu() {
+  const m = document.getElementById('qtMenu');
+  if (m) m.style.display = 'none';
+}
 
 async function cleanupQuickTrips() {
   const btn = document.getElementById('btnCleanupTrips');

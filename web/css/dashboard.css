@@ -400,39 +400,78 @@ tbody td { padding: 9px 14px; vertical-align: middle; }
 
 .muted-text { color: var(--muted); }
 
-/* ─── Quick Trip Button ─────────────────────────────────────────────────── */
+/* ─── Quick Trip Split Button ───────────────────────────────────────────── */
+.qt-split {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+
 .quick-trip-btn {
   background: rgba(251,191,36,.12);
   border: 1px solid rgba(251,191,36,.35);
+  border-right: none;
   color: var(--yellow);
   font-size: 12px;
   font-weight: 700;
-  padding: 4px 14px;
-  border-radius: 999px;
+  padding: 5px 12px;
+  border-radius: 999px 0 0 999px;
   cursor: pointer;
   transition: all .15s;
   white-space: nowrap;
 }
 .quick-trip-btn:hover {
   background: rgba(251,191,36,.22);
-  border-color: var(--yellow);
+  border-color: rgba(251,191,36,.6);
 }
 
-.qt-cleanup-btn {
-  background: rgba(248,113,113,.1);
-  border: 1px solid rgba(248,113,113,.3);
-  color: var(--red);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 4px 12px;
-  border-radius: 999px;
+.qt-split-arrow {
+  background: rgba(251,191,36,.12);
+  border: 1px solid rgba(251,191,36,.35);
+  color: var(--yellow);
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 0 999px 999px 0;
   cursor: pointer;
   transition: all .15s;
-  white-space: nowrap;
+  line-height: 1;
 }
-.qt-cleanup-btn:hover {
-  background: rgba(248,113,113,.2);
-  border-color: var(--red);
+.qt-split-arrow:hover {
+  background: rgba(251,191,36,.22);
+  border-color: rgba(251,191,36,.6);
+}
+
+.qt-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 180px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.qt-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background .1s;
+  border-radius: 0;
+  font-family: var(--font);
+}
+.qt-menu-item:hover {
+  background: rgba(248,113,113,.1);
+  color: var(--red);
+  border-color: transparent;
 }
 
 .qt-delete-btn {

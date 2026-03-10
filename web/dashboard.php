@@ -52,6 +52,16 @@ $apiBase = 'api.php';
     </select>
     <button class="primary" onclick="refresh()">↺ Refresh</button>
     <span id="filterBadge" style="display:none;background:#5b7cf6;color:#fff;font-size:11px;font-weight:600;padding:4px 10px;border-radius:20px;"></span>
+
+    <!-- Quick Trip split button -->
+    <div class="qt-split" id="qtSplit">
+      <button class="quick-trip-btn" id="btnQuickTrip">⚡ Quick Trip</button>
+      <button class="qt-split-arrow" id="btnQtMenu" aria-label="More options" title="More options">▾</button>
+      <div class="qt-menu" id="qtMenu" style="display:none">
+        <button class="qt-menu-item" id="btnCleanupTrips">🗑 Clean up expired</button>
+      </div>
+    </div>
+
     <a href="settings.php" style="font-size:12px;color:var(--muted);text-decoration:none;padding:6px 10px;">⚙️ Settings</a>
     <a href="?logout=1" style="font-size:12px;color:var(--muted);text-decoration:none;padding:6px 10px;">Sign out</a>
     <span id="statusWrap">
@@ -59,6 +69,17 @@ $apiBase = 'api.php';
       <span id="statusText">–</span>
     </span>
   </div>
+</div>
+
+<!-- ─── TAB BAR ────────────────────────────────────────────────────────── -->
+
+<div class="tab-bar">
+  <button class="tab active" data-tab="advisor">Advisor</button>
+  <button class="tab" data-tab="overview">Overview</button>
+  <button class="tab" data-tab="best">Best Routes</button>
+  <button class="tab" data-tab="byday">By Day</button>
+  <button class="tab" data-tab="trends">Trends</button>
+  <button class="tab" data-tab="history">History</button>
 </div>
 
 <!-- ─── FILTER BAR ─────────────────────────────────────────────────────── -->
@@ -74,11 +95,6 @@ $apiBase = 'api.php';
     <div class="chip time-chip" data-tw="upcoming">Upcoming</div>
     <div class="chip time-chip" data-tw="next3h">Next 3 h</div>
     <div class="chip time-chip" data-tw="next">Next</div>
-  </div>
-  <div class="filter-sep" id="quickSep" style="display:none"></div>
-  <div id="quickBar" class="filter-group" style="display:none">
-    <button class="quick-trip-btn" id="btnQuickTrip">⚡ Quick Trip</button>
-    <button class="qt-cleanup-btn" id="btnCleanupTrips" title="Delete all expired / inactive one-time trips">🗑 Clean up</button>
   </div>
 </div>
 
@@ -127,17 +143,6 @@ $apiBase = 'api.php';
       <button class="primary" id="btnSubmitModal">Create Trip</button>
     </div>
   </div>
-</div>
-
-<!-- ─── TAB BAR ────────────────────────────────────────────────────────── -->
-
-<div class="tab-bar">
-  <button class="tab active" data-tab="advisor">Advisor</button>
-  <button class="tab" data-tab="overview">Overview</button>
-  <button class="tab" data-tab="best">Best Routes</button>
-  <button class="tab" data-tab="byday">By Day</button>
-  <button class="tab" data-tab="trends">Trends</button>
-  <button class="tab" data-tab="history">History</button>
 </div>
 
 <!-- ─── CONTENT ────────────────────────────────────────────────────────── -->
