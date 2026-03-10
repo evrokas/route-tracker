@@ -77,7 +77,8 @@ try {
     $config = Config::load($baseDir);
     date_default_timezone_set($config->getTimezone());
 } catch (Exception $e) {
-    jsonError('Server configuration error: ' . $e->getMessage(), 500);
+    error_log('Route Tracker api.php: ' . $e->getMessage());
+    jsonError('Server configuration error.', 500);
 }
 
 require_once $baseDir . '/src/auth.php';
@@ -642,9 +643,20 @@ if ($action === 'export_trips') {
 // ─── export_config ────────────────────────────────────────────────────────────
 
 if ($action === 'export_config') {
+    $includeCredentials = !empty($_GET['credentials']);
+
     // All settings as flat key→value map
     $settings = $pdo->query("SELECT key, value FROM settings ORDER BY key")
                     ->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // Redact sensitive settings unless explicitly requested
+    if (!$includeCredentials) {
+        foreach (['google_maps_api_key', 'dashboard_password_hash'] as $k) {
+            if (array_key_exists($k, $settings)) {
+                $settings[$k] = '***REDACTED***';
+            }
+        }
+    }
 
     // All routes with JSON fields re-encoded for portability
     $routes = array_map(function ($r) {
@@ -666,13 +678,36 @@ if ($action === 'export_config') {
         ];
     }, $config->getAllRoutes());
 
+    // Channel profiles — redact credentials by default
+    $channelProfiles = $config->getAllChannelProfiles();
+    if (!$includeCredentials) {
+        $sensitiveByType = [
+            'telegram' => ['bot_token'],
+            'email'    => ['smtp_pass'],
+            'viber'    => ['auth_token'],
+        ];
+        foreach ($sensitiveByType as $type => $fields) {
+            foreach ($channelProfiles[$type] ?? [] as &$profile) {
+                foreach ($fields as $field) {
+                    if (array_key_exists($field, $profile)) {
+                        $profile[$field] = '***REDACTED***';
+                    }
+                }
+            }
+            unset($profile);
+        }
+    }
+
     $backup = [
         'version'          => 3,
         'app'              => 'Route Tracker',
         'exported_at'      => date('c'),
+        '_warning'         => $includeCredentials
+            ? 'WARNING: This file contains plaintext credentials. Store it securely and delete after use.'
+            : 'Credentials have been redacted. To export with plaintext credentials, use ?credentials=1.',
         'settings'         => $settings,
         'routes'           => $routes,
-        'channel_profiles' => $config->getAllChannelProfiles(),
+        'channel_profiles' => $channelProfiles,
         'alert_profiles'   => $config->getAllAlertProfiles(),
     ];
 
@@ -688,8 +723,12 @@ if ($action === 'export_config') {
 
 if ($action === 'import_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     verifyCsrf();
-    $body = json_decode(file_get_contents('php://input'), true);
+    $raw  = file_get_contents('php://input');
+    $body = json_decode($raw, true);
 
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        jsonError('Invalid JSON: ' . json_last_error_msg());
+    }
     if (!is_array($body) || ($body['version'] ?? 0) !== 3) {
         jsonError('Invalid backup file: expected Route Tracker v3 format (version: 3)');
     }

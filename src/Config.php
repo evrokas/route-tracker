@@ -26,19 +26,21 @@ class Config
 
     /** Defaults for deploy config (used when config/settings.php is missing or incomplete) */
     private const DEPLOY_DEFAULTS = [
-        'data_dir'            => 'data',
-        'db_filename'         => 'routes.sqlite',
-        'curl_timeout'        => 30,
-        'curl_timeout_alerts' => 15,
-        'remember_me_cookie'  => 'rt_remember',
-        'remember_me_ttl'     => 2592000, // 30 * 24 * 3600
-        'log_tail_lines'      => 50,
-        'api_default_limit'   => 100,
-        'api_max_limit'       => 500,
-        'dir_permissions'     => 0775,
-        'buffer_stddev_low'   => 180,
-        'buffer_stddev_high'  => 480,
-        'debug'               => false,
+        'data_dir'                         => 'data',
+        'db_filename'                      => 'routes.sqlite',
+        'curl_timeout'                     => 30,
+        'curl_timeout_alerts'              => 15,
+        'remember_me_cookie'               => 'rt_remember',
+        'remember_me_ttl'                  => 2592000, // 30 * 24 * 3600
+        'log_tail_lines'                   => 50,
+        'api_default_limit'                => 100,
+        'api_max_limit'                    => 500,
+        'dir_permissions'                  => 0700,
+        'session_idle_timeout'             => 3600,
+        'buffer_stddev_low'                => 180,
+        'buffer_stddev_high'               => 480,
+        'collection_window_offset_minutes' => 45,
+        'debug'                            => false,
     ];
 
     // Day name → ISO day number (1=Mon .. 7=Sun)
@@ -382,8 +384,9 @@ class Config
     private function estimateDepartureTime(string $arriveTime): string
     {
         [$h, $m] = explode(':', $arriveTime);
-        $ts = mktime((int)$h, (int)$m, 0);
-        $ts -= 45 * 60;
+        $offset  = self::deploy('collection_window_offset_minutes', 45);
+        $ts      = mktime((int)$h, (int)$m, 0);
+        $ts     -= (int)$offset * 60;
         return date('H:i', $ts);
     }
 
@@ -577,12 +580,16 @@ class Config
      */
     public function getAllChannelProfiles(): array
     {
-        $result = [];
-        foreach (['telegram', 'email', 'signal', 'viber'] as $type) {
-            $table = $type . '_profiles';
+        $result  = [];
+        $queries = [
+            'telegram' => "SELECT * FROM telegram_profiles ORDER BY label",
+            'email'    => "SELECT * FROM email_profiles ORDER BY label",
+            'signal'   => "SELECT * FROM signal_profiles ORDER BY label",
+            'viber'    => "SELECT * FROM viber_profiles ORDER BY label",
+        ];
+        foreach ($queries as $type => $query) {
             try {
-                $rows = $this->pdo->query("SELECT * FROM {$table} ORDER BY label")
-                                  ->fetchAll(PDO::FETCH_ASSOC);
+                $rows = $this->pdo->query($query)->fetchAll(PDO::FETCH_ASSOC);
                 $result[$type] = array_map(function ($row) {
                     $row['enabled'] = (bool)(int)$row['enabled'];
                     return $row;
@@ -709,13 +716,14 @@ class Config
 
     public function deleteChannelProfile(string $type, string $id): void
     {
-        $allowed = ['telegram', 'email', 'signal', 'viber'];
-        if (!in_array($type, $allowed, true)) {
-            throw new InvalidArgumentException("Unknown channel type: {$type}");
-        }
-        $table = $type . '_profiles';
-        $st = $this->pdo->prepare("DELETE FROM {$table} WHERE id = :id");
-        $st->execute([':id' => $id]);
+        $query = match($type) {
+            'telegram' => "DELETE FROM telegram_profiles WHERE id = :id",
+            'email'    => "DELETE FROM email_profiles WHERE id = :id",
+            'signal'   => "DELETE FROM signal_profiles WHERE id = :id",
+            'viber'    => "DELETE FROM viber_profiles WHERE id = :id",
+            default    => throw new InvalidArgumentException("Unknown channel type: {$type}"),
+        };
+        $this->pdo->prepare($query)->execute([':id' => $id]);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

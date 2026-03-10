@@ -108,8 +108,13 @@ foreach ($expiring as $rt) {
         if (count($parts) < 2) {
             continue;
         }
+        $hours = (int)$parts[0];
+        $mins  = (int)$parts[1];
+        if ($hours < 0 || $hours > 23 || $mins < 0 || $mins > 59) {
+            continue;
+        }
         $cutoff = new DateTime();
-        $cutoff->setTime((int)$parts[0], (int)$parts[1], 0);
+        $cutoff->setTime($hours, $mins, 0);
         $cutoff->modify("+{$windowAfterMin} minutes");
 
         if ($nowDt >= $cutoff) {

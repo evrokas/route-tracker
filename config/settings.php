@@ -28,11 +28,17 @@ return [
     'api_max_limit'         => 500,                 // maximum row limit for API queries
 
     // ─── Filesystem ──────────────────────────────────────────────────
-    'dir_permissions'       => 0775,                // data directory permissions
+    'dir_permissions'       => 0700,                // data directory permissions
+
+    // ─── Session ─────────────────────────────────────────────────────
+    'session_idle_timeout'  => 3600,                // seconds of inactivity before session expires (1 hour)
 
     // ─── Advisor buffer thresholds (seconds of stddev) ───────────────
     'buffer_stddev_low'     => 180,                 // below this → 5 min buffer
     'buffer_stddev_high'    => 480,                 // below this → 10 min buffer; above → 15 min
+
+    // ─── Collection window offset ────────────────────────────────────
+    'collection_window_offset_minutes' => 45,       // estimated departure lead-time for arrive-mode routes
 
     // ─── Debug ───────────────────────────────────────────────────────
     'debug'                 => false,               // enable verbose error output

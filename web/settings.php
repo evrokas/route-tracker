@@ -13,7 +13,8 @@ Auth::requireLogin();
 try {
     $config = Config::load($baseDir);
 } catch (Exception $e) {
-    die('<pre>Config error: ' . htmlspecialchars($e->getMessage()) . "\n\nRun: php schema.php --init</pre>");
+    error_log('Route Tracker settings.php: ' . $e->getMessage());
+    die('<pre>Configuration error — check the server error log for details.</pre>');
 }
 
 if (isset($_GET['logout'])) {

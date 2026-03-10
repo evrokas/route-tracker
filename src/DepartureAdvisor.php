@@ -128,10 +128,9 @@ class DepartureAdvisor
         $recommendedMin  = $arrivalMinutes - $liveMin - $bufferMin;
         $minsToDeparture = $recommendedMin - $currentMinutes;
 
-        $recHour = (int)floor($recommendedMin / 60);
-        $recMin  = $recommendedMin % 60;
-        if ($recMin < 0) { $recHour--; $recMin += 60; }
-        $recommendedDepart = sprintf('%02d:%02d', ($recHour + 24) % 24, ($recMin + 60) % 60);
+        $departDt = new DateTime('today');
+        $departDt->modify("{$recommendedMin} minutes");
+        $recommendedDepart = $departDt->format('H:i');
 
         // ── Determine current stage ───────────────────────────────────────
         $stage = $this->currentStage($minsToArrival, $minsToDeparture);

@@ -1068,7 +1068,12 @@ function exportTrips() {
 }
 
 function exportConfig() {
-  window.location.href = `${API_BASE}?action=export_config`;
+  const withCreds = confirm(
+    'Include credentials in the backup?\n\n' +
+    'OK  — export with plaintext API keys, passwords, and tokens (store securely).\n' +
+    'Cancel — export with credentials redacted (safe for sharing).'
+  );
+  window.location.href = `${API_BASE}?action=export_config` + (withCreds ? '&credentials=1' : '');
 }
 
 async function importConfig() {

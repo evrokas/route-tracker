@@ -47,7 +47,7 @@ class Auth
             session_set_cookie_params([
                 'lifetime' => 0,           // until browser closes
                 'path'     => '/',
-                'secure'   => isset($_SERVER['HTTPS']),
+                'secure'   => self::isSecure(),
                 'httponly' => true,
                 'samesite' => 'Strict',
             ]);
@@ -66,6 +66,14 @@ class Auth
         self::startSession();
 
         if (!empty($_SESSION['rt_authed'])) {
+            if (self::isSessionExpired()) {
+                // Idle timeout — clear session and force fresh login (no remember-me bypass)
+                $_SESSION = [];
+                session_regenerate_id(true);
+                header('Location: login.php');
+                exit;
+            }
+            $_SESSION['last_active'] = time();
             if (empty($_SESSION['csrf_token'])) {
                 $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
             }
@@ -74,6 +82,7 @@ class Auth
 
         // Try remember-me cookie
         if (self::checkRememberCookie()) {
+            $_SESSION['last_active'] = time();
             if (empty($_SESSION['csrf_token'])) {
                 $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
             }
@@ -93,6 +102,15 @@ class Auth
         self::startSession();
 
         if (!empty($_SESSION['rt_authed'])) {
+            if (self::isSessionExpired()) {
+                $_SESSION = [];
+                session_regenerate_id(true);
+                http_response_code(401);
+                header('Content-Type: application/json; charset=utf-8');
+                echo json_encode(['error' => 'Session expired. Please log in again.', 'login_url' => 'login.php']);
+                exit;
+            }
+            $_SESSION['last_active'] = time();
             if (empty($_SESSION['csrf_token'])) {
                 $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
             }
@@ -100,6 +118,7 @@ class Auth
         }
 
         if (self::checkRememberCookie()) {
+            $_SESSION['last_active'] = time();
             if (empty($_SESSION['csrf_token'])) {
                 $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
             }
@@ -144,7 +163,7 @@ class Auth
         setcookie($deploy['remember_me_cookie'], $token, [
             'expires'  => $expiry,
             'path'     => '/',
-            'secure'   => isset($_SERVER['HTTPS']),
+            'secure'   => self::isSecure(),
             'httponly' => true,
             'samesite' => 'Strict',
         ]);
@@ -166,7 +185,7 @@ class Auth
         setcookie($cookieName, '', [
             'expires'  => time() - 3600,
             'path'     => '/',
-            'secure'   => isset($_SERVER['HTTPS']),
+            'secure'   => self::isSecure(),
             'httponly' => true,
             'samesite' => 'Strict',
         ]);
@@ -187,6 +206,32 @@ class Auth
     }
 
     // ─── Private helpers ──────────────────────────────────────────────────────
+
+    /**
+     * True when the authenticated session has been idle longer than session_idle_timeout.
+     * Returns false if last_active has never been set (first request in a new session).
+     */
+    private static function isSessionExpired(): bool
+    {
+        if (empty($_SESSION['last_active'])) {
+            return false;
+        }
+        $timeout = self::getDeployConfig()['session_idle_timeout'] ?? 3600;
+        return (time() - (int)$_SESSION['last_active']) > (int)$timeout;
+    }
+
+    /**
+     * True when the current request arrived over HTTPS.
+     * Checks both the native HTTPS server var and the X-Forwarded-Proto header
+     * set by reverse proxies that terminate TLS.
+     */
+    private static function isSecure(): bool
+    {
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            return true;
+        }
+        return ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+    }
 
     /**
      * Validate the remember-me cookie against the stored hash.
