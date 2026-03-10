@@ -45,13 +45,17 @@ tracker/
 │   └── install.sh
 ├── docs/
 │   └── migration-v3.md
+├── lib/                    # Third-party libraries (gitignored — cloned separately)
+│   └── phpmailer/          # git clone https://github.com/PHPMailer/PHPMailer.git lib/phpmailer
 ├── data/                   # Runtime data (gitignored)
 ├── plans/                  # Design docs
 ├── CLAUDE.md
 └── README.md
 ```
 
-**Path convention:** `web/` files use `$baseDir = dirname(__DIR__)` to get project root. `src/` files use `$baseDir = dirname(__DIR__)` for project root and `__DIR__` for sibling requires. DocumentRoot points at `web/` so `src/`, `data/`, and config files are outside the web root.
+**Path convention:** `web/` files use `$baseDir = dirname(__DIR__)` to get project root. `src/` files use `$baseDir = dirname(__DIR__)` for project root and `__DIR__` for sibling requires. DocumentRoot points at `web/` so `src/`, `data/`, `lib/`, and config files are outside the web root.
+
+**Third-party libraries (`lib/`):** Not committed to git. Each is a separate git clone so it can be updated independently with `git pull`. The install script clones them automatically. To add a new library, clone it into `lib/<name>/` and add a note here and in `scripts/install.sh`.
 
 ## Core Architecture
 

@@ -104,6 +104,58 @@ function getPostData(): array
     return $_POST ?: [];
 }
 
+function validateEnum(mixed $value, array $allowed, string $default): string
+{
+    return in_array($value, $allowed, true) ? (string)$value : $default;
+}
+
+function validateSchedule(mixed $raw): array
+{
+    if (!is_array($raw)) {
+        jsonError('schedule must be an array', 400);
+    }
+
+    $validDays   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun','Weekdays','Weekends','All'];
+    $timePattern = '/^([01]\d|2[0-3]):[0-5]\d$/';
+    $cleaned     = [];
+
+    foreach ($raw as $i => $entry) {
+        if (!is_array($entry)) {
+            jsonError("schedule[{$i}]: each entry must be an object", 400);
+        }
+
+        $days = $entry['days'] ?? null;
+        if (is_string($days)) {
+            $days = [$days];
+        }
+        if (!is_array($days) || empty($days)) {
+            jsonError("schedule[{$i}]: 'days' must be a non-empty string or array", 400);
+        }
+        foreach ($days as $d) {
+            if (!in_array($d, $validDays, true)) {
+                jsonError("schedule[{$i}]: unknown day value '{$d}'", 400);
+            }
+        }
+
+        $hasArrive = isset($entry['arrive']) && preg_match($timePattern, $entry['arrive']);
+        $hasDepart = isset($entry['depart']) && preg_match($timePattern, $entry['depart']);
+
+        if (!$hasArrive && !$hasDepart) {
+            jsonError("schedule[{$i}]: must have 'arrive' or 'depart' in HH:MM format", 400);
+        }
+        if ($hasArrive && $hasDepart) {
+            jsonError("schedule[{$i}]: cannot have both 'arrive' and 'depart'", 400);
+        }
+
+        $normalized = ['days' => $entry['days']];
+        if ($hasArrive) $normalized['arrive'] = $entry['arrive'];
+        if ($hasDepart) $normalized['depart'] = $entry['depart'];
+        $cleaned[] = $normalized;
+    }
+
+    return $cleaned;
+}
+
 // ─── WHERE clause builder ─────────────────────────────────────────────────────
 
 function buildWhere(array &$params, ?string $routeId, ?int $year, ?int $month, ?int $day, string $prefix = 't'): string
@@ -667,11 +719,11 @@ if ($action === 'import_config' && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':label'                => $r['label'],
                     ':origin'               => $r['origin']              ?? '',
                     ':destination'          => $r['destination']         ?? '',
-                    ':travel_mode'          => $r['travel_mode']         ?? 'driving',
+                    ':travel_mode'          => validateEnum($r['travel_mode'] ?? 'driving', ['driving','walking','bicycling','transit'], 'driving'),
                     ':schedule'             => $encodeIfArray($r['schedule']      ?? null, '[]'),
                     ':advisor_enabled'      => (int)($r['advisor_enabled']        ?? 0),
                     ':advisor_start_before' => (int)($r['advisor_start_before']   ?? 90),
-                    ':advisor_buffer_mode'  => $r['advisor_buffer_mode']           ?? 'auto',
+                    ':advisor_buffer_mode'  => validateEnum($r['advisor_buffer_mode'] ?? 'auto', ['auto','fixed'], 'auto'),
                     ':advisor_fixed_buffer' => (int)($r['advisor_fixed_buffer']   ?? 10),
                     ':advisor_stages'       => $encodeIfArray($r['advisor_stages'] ?? null, '["planning","window","reminder","urgent","last_call"]'),
                     ':alert_profile_ids'    => $encodeIfArray($profileIds,          '[]'),
@@ -846,8 +898,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!password_verify($current, $config->getDashboardPasswordHash())) {
             jsonError('Current password is incorrect', 403);
         }
-        if (strlen($newPw) < 6) {
-            jsonError('New password must be at least 6 characters', 400);
+        if (strlen($newPw) < 12) {
+            jsonError('New password must be at least 12 characters', 400);
         }
         if ($newPw !== $confirm) {
             jsonError('Passwords do not match', 400);
@@ -876,7 +928,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             jsonError('label, origin, and destination are required', 400);
         }
 
-        $schedule        = $body['schedule']          ?? [];
+        $schedule        = validateSchedule($body['schedule'] ?? []);
         $alertProfileIds = $body['alert_profile_ids'] ?? [];
         $advisorStages   = $body['advisor_stages']    ?? ['planning','window','reminder','urgent','last_call'];
 
@@ -925,11 +977,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':label'                => $label,
             ':origin'               => $origin,
             ':destination'          => $destination,
-            ':travel_mode'          => $body['travel_mode']          ?? 'driving',
-            ':schedule'             => json_encode(is_array($schedule) ? $schedule : []),
+            ':travel_mode'          => validateEnum($body['travel_mode'] ?? 'driving', ['driving','walking','bicycling','transit'], 'driving'),
+            ':schedule'             => json_encode($schedule),
             ':advisor_enabled'      => (int)(bool)($body['advisor_enabled'] ?? 0),
             ':advisor_start_before' => (int)($body['advisor_start_before'] ?? 90),
-            ':advisor_buffer_mode'  => $body['advisor_buffer_mode']   ?? 'auto',
+            ':advisor_buffer_mode'  => validateEnum($body['advisor_buffer_mode'] ?? 'auto', ['auto','fixed'], 'auto'),
             ':advisor_fixed_buffer' => (int)($body['advisor_fixed_buffer'] ?? 10),
             ':advisor_stages'       => json_encode(is_array($advisorStages) ? $advisorStages : []),
             ':alert_profile_ids'    => json_encode(is_array($alertProfileIds) ? $alertProfileIds : []),
@@ -971,7 +1023,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Today's day abbreviation (Mon, Tue, …)
         $dayAbbr  = date('D');
-        $id       = 'qt_' . time();
+        $id       = 'qt_' . bin2hex(random_bytes(8));
         $now      = date('Y-m-d H:i:s');
         $schedule = json_encode([['days' => $dayAbbr, 'arrive' => $arrive]]);
 

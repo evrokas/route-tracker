@@ -243,8 +243,8 @@ else
     success "Created: ${INSTALL_DIR}"
 fi
 
-mkdir -p "${INSTALL_DIR}/web/css" "${INSTALL_DIR}/web/js" "${INSTALL_DIR}/src" "${INSTALL_DIR}/config" "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/data"
-success "Created directory structure: web/, src/, config/, scripts/, data/"
+mkdir -p "${INSTALL_DIR}/web/css" "${INSTALL_DIR}/web/js" "${INSTALL_DIR}/src" "${INSTALL_DIR}/config" "${INSTALL_DIR}/scripts" "${INSTALL_DIR}/data" "${INSTALL_DIR}/lib"
+success "Created directory structure: web/, src/, config/, scripts/, data/, lib/"
 
 # ═══════════════════════════════════════════════════════════════════
 header "Step 5: Copying Project Files"
@@ -332,7 +332,26 @@ find "${INSTALL_DIR}" -maxdepth 1 -name "*.md" -exec chmod 644 {} \;
 success "Permissions set (owner: ${WEB_USER}:${WEB_GROUP})"
 
 # ═══════════════════════════════════════════════════════════════════
-header "Step 7: Initializing Database"
+header "Step 7: PHP Libraries"
+# ═══════════════════════════════════════════════════════════════════
+
+PHPMAILER_DIR="${INSTALL_DIR}/lib/phpmailer"
+if [ -d "${PHPMAILER_DIR}/.git" ]; then
+    info "PHPMailer already present — pulling latest version"
+    git -C "${PHPMAILER_DIR}" pull --ff-only 2>&1 | while IFS= read -r line; do echo "    ${line}"; done
+    success "PHPMailer up to date"
+elif command -v git &> /dev/null; then
+    info "Cloning PHPMailer into lib/phpmailer ..."
+    git clone --depth=1 https://github.com/PHPMailer/PHPMailer.git "${PHPMAILER_DIR}" 2>&1 | while IFS= read -r line; do echo "    ${line}"; done
+    success "PHPMailer cloned ($(git -C "${PHPMAILER_DIR}" describe --tags 2>/dev/null || echo 'latest'))"
+else
+    warn "git not found — PHPMailer not installed. Email alerts will fail."
+    echo "    Install git and then run:"
+    echo "    git clone https://github.com/PHPMailer/PHPMailer.git ${PHPMAILER_DIR}"
+fi
+
+# ═══════════════════════════════════════════════════════════════════
+header "Step 8: Initializing Database"
 # ═══════════════════════════════════════════════════════════════════
 
 if [ -f "${INSTALL_DIR}/src/schema.php" ]; then
@@ -346,7 +365,7 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-header "Step 8: Cron Setup"
+header "Step 9: Cron Setup"
 # ═══════════════════════════════════════════════════════════════════
 
 echo ""
@@ -357,7 +376,7 @@ echo ""
 info "Add with: crontab -e"
 
 # ═══════════════════════════════════════════════════════════════════
-header "Step 9: Web Server Configuration"
+header "Step 10: Web Server Configuration"
 # ═══════════════════════════════════════════════════════════════════
 
 echo ""
@@ -446,5 +465,8 @@ echo ""
 echo "  6. Test from Settings → System tab:"
 echo "     Run Test Collection, Run Advisor Now"
 echo ""
-echo "  7. For ad-hoc trips, use the ⚡ Quick Trip button in the dashboard header."
+echo "  7. For ad-hoc trips, use the ⚡ Quick Trip button in the dashboard header.
+
+  Libraries (auto-installed above, update any time):
+    cd ${INSTALL_DIR}/lib/phpmailer && git pull"
 echo ""

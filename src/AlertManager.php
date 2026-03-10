@@ -6,7 +6,20 @@
  *
  * Alert flow:
  *   route → alert_profile_ids[] → alert_profiles.channels[] → channel_profiles → send
+ *
+ * Requires PHPMailer (lib/phpmailer) for SMTP — clone once with:
+ *   git clone https://github.com/PHPMailer/PHPMailer.git lib/phpmailer
+ *   Update later: cd lib/phpmailer && git pull
  */
+
+$_phpmailerBase = dirname(__DIR__) . '/lib/phpmailer/src';
+require_once $_phpmailerBase . '/Exception.php';
+require_once $_phpmailerBase . '/PHPMailer.php';
+require_once $_phpmailerBase . '/SMTP.php';
+unset($_phpmailerBase);
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception as PHPMailerException;
 
 class AlertManager
 {
@@ -48,7 +61,7 @@ class AlertManager
             $avgDuration > 0 &&
             $currentDuration > $avgDuration * (1 + $settings['traffic_threshold_percent'] / 100)
         ) {
-            if ($this->canSendAlert($route['id'])) {
+            if ($this->tryIncrementAlert($route['id'])) {
                 $pct = round(($currentDuration - $avgDuration) / $avgDuration * 100);
                 $msg = $this->buildHeavyTrafficMessage(
                     $route, $schedEntry, $currentDuration, $avgDuration, $pct
@@ -56,7 +69,6 @@ class AlertManager
                 foreach ($profiles as $profile) {
                     $this->dispatchProfile($profile, "🚗🔴 Heavy Traffic Alert", $msg, $route);
                 }
-                $this->incrementAlertCount($route['id']);
             }
         }
 
@@ -66,7 +78,7 @@ class AlertManager
             $bestAltDuration !== null &&
             ($currentDuration - $bestAltDuration) > 120  // > 2 minutes savings
         ) {
-            if ($this->canSendAlert($route['id'])) {
+            if ($this->tryIncrementAlert($route['id'])) {
                 $msg = $this->buildBetterRouteMessage(
                     $route, $schedEntry, $currentDuration, $currentRoute,
                     $bestAltDuration, $bestAltRoute
@@ -74,7 +86,6 @@ class AlertManager
                 foreach ($profiles as $profile) {
                     $this->dispatchProfile($profile, "🚗💡 Better Route Found", $msg, $route);
                 }
-                $this->incrementAlertCount($route['id']);
             }
         }
     }
@@ -253,33 +264,48 @@ class AlertManager
     // Rate limiting
     // ──────────────────────────────────────────────────────────────────────────
 
-    private function canSendAlert(string $routeId): bool
+    /**
+     * Atomically checks the daily limit and increments the counter if below it.
+     * Uses an exclusive file lock so concurrent cron processes cannot both pass
+     * the limit check and send duplicate alerts.
+     * Returns true if the alert is allowed (and the count has been incremented).
+     */
+    private function tryIncrementAlert(string $routeId): bool
     {
         $settings = $this->config->getAlertSettings();
-        $max      = $settings['max_alerts_per_day'] ?? 3;
-        $counts   = $this->loadAlertCounts();
+        $max      = (int)($settings['max_alerts_per_day'] ?? 3);
         $today    = date('Y-m-d');
-        return ($counts[$today][$routeId] ?? 0) < $max;
-    }
+        $lockFile = $this->countFile . '.lock';
 
-    private function incrementAlertCount(string $routeId): void
-    {
-        $counts = $this->loadAlertCounts();
-        $today  = date('Y-m-d');
-
-        foreach (array_keys($counts) as $d) {
-            if ($d !== $today) unset($counts[$d]);
+        $lock = fopen($lockFile, 'c');
+        if (!$lock || !flock($lock, LOCK_EX)) {
+            // Cannot acquire lock — fail safe, do not send
+            return false;
         }
 
-        $counts[$today][$routeId] = ($counts[$today][$routeId] ?? 0) + 1;
-        file_put_contents($this->countFile, json_encode($counts, JSON_PRETTY_PRINT));
-    }
+        try {
+            $counts = [];
+            if (file_exists($this->countFile)) {
+                $raw    = file_get_contents($this->countFile);
+                $counts = json_decode($raw, true) ?? [];
+            }
 
-    private function loadAlertCounts(): array
-    {
-        if (!file_exists($this->countFile)) return [];
-        $data = json_decode(file_get_contents($this->countFile), true);
-        return is_array($data) ? $data : [];
+            // Prune stale dates
+            foreach (array_keys($counts) as $d) {
+                if ($d !== $today) unset($counts[$d]);
+            }
+
+            if (($counts[$today][$routeId] ?? 0) >= $max) {
+                return false;
+            }
+
+            $counts[$today][$routeId] = ($counts[$today][$routeId] ?? 0) + 1;
+            file_put_contents($this->countFile, json_encode($counts, JSON_PRETTY_PRINT));
+            return true;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -405,7 +431,7 @@ class AlertManager
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // SMTP implementation
+    // SMTP via PHPMailer (lib/phpmailer)
     // ──────────────────────────────────────────────────────────────────────────
 
     private function sendSmtp(array $cfg, string $subject, string $body, array $recipients): bool
@@ -418,63 +444,39 @@ class AlertManager
         $from     = $cfg['from_address']    ?? $user;
         $fromName = $cfg['from_name']       ?? 'Route Tracker';
 
-        if ($enc === 'ssl') {
-            $host = 'ssl://' . $host;
-        }
+        $mail = new PHPMailer(true); // true = throw PHPMailerException on error
 
-        $errno = 0; $errstr = '';
-        $sock = @fsockopen($host, $port, $errno, $errstr, 30);
-        if (!$sock) {
-            throw new RuntimeException("SMTP connect failed: {$errstr} ({$errno})");
-        }
+        $mail->isSMTP();
+        $mail->Host     = $host;
+        $mail->Port     = $port;
+        $mail->CharSet  = PHPMailer::CHARSET_UTF8;
+        $mail->Timeout  = 30;
 
-        $read = fn() => fgets($sock, 512);
-        $send = function(string $cmd) use ($sock, &$read): string {
-            fwrite($sock, $cmd . "\r\n");
-            return $read();
+        // Encryption
+        $mail->SMTPSecure = match ($enc) {
+            'ssl'  => PHPMailer::ENCRYPTION_SMTPS,
+            'tls'  => PHPMailer::ENCRYPTION_STARTTLS,
+            default => '',
         };
 
-        $read();
-
-        if ($enc === 'tls') {
-            $send("EHLO localhost");
-            $send("STARTTLS");
-            stream_socket_enable_crypto($sock, true, STREAM_CRYPTO_METHOD_TLS_CLIENT);
+        // Auth (skip if no credentials provided)
+        if ($user !== '') {
+            $mail->SMTPAuth = true;
+            $mail->Username = $user;
+            $mail->Password = $pass;
         }
 
-        $send("EHLO localhost");
-        $send("AUTH LOGIN");
-        $send(base64_encode($user));
-        $send(base64_encode($pass));
-        $send("MAIL FROM:<{$from}>");
+        $mail->setFrom($from, $fromName);
 
         foreach ($recipients as $rcpt) {
-            $send("RCPT TO:<{$rcpt}>");
+            $mail->addAddress(trim($rcpt));
         }
 
-        $send("DATA");
+        $mail->Subject = $subject;
+        $mail->Body    = $body;
 
-        $date           = date('r');
-        $to             = implode(', ', $recipients);
-        $subjectEncoded = '=?UTF-8?B?' . base64_encode($subject) . '?=';
-        $fromEncoded    = '=?UTF-8?B?' . base64_encode($fromName) . '?=';
-
-        $msg  = "Date: {$date}\r\n";
-        $msg .= "From: {$fromEncoded} <{$from}>\r\n";
-        $msg .= "To: {$to}\r\n";
-        $msg .= "Subject: {$subjectEncoded}\r\n";
-        $msg .= "MIME-Version: 1.0\r\n";
-        $msg .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $msg .= "Content-Transfer-Encoding: base64\r\n";
-        $msg .= "\r\n";
-        $msg .= chunk_split(base64_encode($body));
-        $msg .= "\r\n.";
-
-        $resp = $send($msg);
-        $send("QUIT");
-        fclose($sock);
-
-        return str_starts_with(trim($resp), '2');
+        $mail->send();
+        return true;
     }
 
     // ──────────────────────────────────────────────────────────────────────────

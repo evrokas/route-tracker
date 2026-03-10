@@ -1,6 +1,9 @@
 # Runtime data
 data/
 
+# Third-party libraries (cloned separately — see README § Libraries)
+lib/
+
 # IDE / editor
 .idea/
 .vscode/
@@ -11,3 +14,7 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Critical bugs until fixed
+plans/security-audit.md
+plans/fix-*.md
