@@ -41,6 +41,8 @@ class Config
         'buffer_stddev_high'               => 480,
         'collection_window_offset_minutes' => 45,
         'debug'                            => false,
+        'ernsauth_url'                     => '',
+        'ernsauth_api_key'                 => '',
     ];
 
     // Day name → ISO day number (1=Mon .. 7=Sun)

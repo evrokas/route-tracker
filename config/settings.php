@@ -42,4 +42,8 @@ return [
 
     // ─── Debug ───────────────────────────────────────────────────────
     'debug'                 => false,               // enable verbose error output
+
+    // ─── ErnsAuth SSO (leave empty to disable) ──────────────────────────
+    'ernsauth_url'          => 'http://localhost/apps/ernsauth/web/sso-api.php',                  // e.g. 'https://example.com/apps/ernsauth/web/sso-api.php'
+    'ernsauth_api_key'      => '00429715682fa973a67b55b77fe418a4351c7fdd48c272ac5b23a62dcdb0cdfa',                  // shared API key from ErnsAuth admin panel
 ];

@@ -81,11 +81,83 @@ try {
     jsonError('Server configuration error.', 500);
 }
 
+$action = $_GET['action'] ?? 'overview';
+
+// ─── ErnsAuth proxy actions (no auth required — used during login) ───────────
+
+$ernsauthUrl = Config::deploy('ernsauth_url', '');
+$ernsauthActions = ['ernsauth_create_challenge', 'ernsauth_poll_challenge',
+                    'ernsauth_send_otp', 'ernsauth_verify_otp',
+                    'ernsauth_request_reset', 'ernsauth_verify_reset'];
+
+if ($ernsauthUrl && in_array($action, $ernsauthActions, true)) {
+    require_once $baseDir . '/lib/auth/ErnsAuthClient.php';
+    require_once $baseDir . '/src/auth.php';
+    Auth::startSession();
+
+    $client = new ErnsAuthClient($ernsauthUrl, Config::deploy('ernsauth_api_key', ''));
+    $body = file_get_contents('php://input');
+    $input = $body ? (json_decode($body, true) ?: []) : $_POST;
+
+    try {
+        switch ($action) {
+            case 'ernsauth_create_challenge':
+                $result = $client->createChallenge(
+                    $_SERVER['REMOTE_ADDR'] ?? '',
+                    $_SERVER['HTTP_USER_AGENT'] ?? ''
+                );
+                jsonOut($result);
+
+            case 'ernsauth_poll_challenge':
+                $challengeId = $_GET['challenge_id'] ?? ($input['challenge_id'] ?? '');
+                $result = $client->pollChallenge($challengeId);
+                // If approved, exchange code and create local session
+                if (($result['status'] ?? '') === 'approved' && !empty($result['auth_code'])) {
+                    $user = $client->exchangeCode($result['auth_code']);
+                    session_regenerate_id(true);
+                    $_SESSION['rt_authed'] = true;
+                    $result['authenticated'] = true;
+                    unset($result['auth_code']);
+                }
+                jsonOut($result);
+
+            case 'ernsauth_send_otp':
+                $email = trim($input['email'] ?? '');
+                $result = $client->sendOtp($email);
+                jsonOut($result);
+
+            case 'ernsauth_verify_otp':
+                $otpId = $input['otp_id'] ?? '';
+                $code = $input['code'] ?? '';
+                $user = $client->verifyOtp($otpId, $code);
+                session_regenerate_id(true);
+                $_SESSION['rt_authed'] = true;
+                jsonOut(['success' => true, 'user' => $user]);
+
+            case 'ernsauth_request_reset':
+                $email = trim($input['email'] ?? '');
+                $result = $client->requestPasswordReset($email);
+                jsonOut($result);
+
+            case 'ernsauth_verify_reset':
+                $result = $client->verifyPasswordReset(
+                    $input['email'] ?? '',
+                    $input['code'] ?? '',
+                    $input['new_password'] ?? ''
+                );
+                jsonOut($result);
+        }
+    } catch (RuntimeException $e) {
+        jsonError($e->getMessage());
+    }
+}
+
+// ─── Auth-required actions ───────────────────────────────────────────────────
+
 require_once $baseDir . '/src/auth.php';
 Auth::requireLoginOrJson();
 
-$pdo    = $config->getPdo();
-$action = $_GET['action'] ?? 'overview';
+$pdo = $config->getPdo();
 
 // ─── Input helpers ────────────────────────────────────────────────────────────
 
