@@ -120,6 +120,8 @@ tracker/
 | `monitoring_tokens` | Short-lived tokens for the public monitor page |
 | `remember_tokens` | Remember-me cookie tokens |
 
+**Cascade on route delete:** `trips`, `advisor_state`, and `monitoring_tokens` reference `routes(id)` with `ON DELETE CASCADE`, so deleting a route (`delete_route` / `cleanup_quick_trips`) permanently removes all of its collected trip history and state — no orphaned rows are left behind. The connection runs with `PRAGMA foreign_keys=ON` and `busy_timeout=5000`. The API deletes children explicitly inside a transaction too (`deleteRoutesWithData()` in `api.php`), so it works even on a DB predating the cascade migration.
+
 ### routes table — notable columns
 
 | Column | Type | Notes |

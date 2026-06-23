@@ -140,6 +140,9 @@ class Config
         $this->pdo = new PDO("sqlite:{$dbPath}");
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->pdo->exec('PRAGMA journal_mode=WAL;');
+        // Wait up to 5s for a competing writer (e.g. the advisor cron) instead of
+        // failing immediately with "database is locked".
+        $this->pdo->exec('PRAGMA busy_timeout=5000;');
         $this->pdo->exec('PRAGMA foreign_keys=ON;');
     }
 

@@ -497,7 +497,7 @@ function openAddrMap(inputId) {
 }
 
 async function deleteRoute(id, label) {
-  if (!confirm(`Delete route "${label}"?\n\nThis will NOT delete historical trip data.`)) return;
+  if (!confirm(`Delete route "${label}"?\n\nThis permanently deletes the route and all of its collected trip history. This cannot be undone.`)) return;
   const result = await apiPost('delete_route', { id });
   if (result?.ok) {
     loadRoutes();

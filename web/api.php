@@ -188,6 +188,47 @@ function verifyCsrf(): void
     }
 }
 
+/**
+ * Delete one or more routes together with all data that references them
+ * (trips, advisor state, monitoring tokens). Children are removed before the
+ * route so the trips→routes foreign key is never violated, regardless of
+ * whether the FK has ON DELETE CASCADE. Runs in a single transaction so a
+ * failure can't leave half-deleted data behind.
+ *
+ * @param string[] $ids Route IDs to delete.
+ * @return int Number of routes actually deleted.
+ */
+function deleteRoutesWithData(PDO $pdo, array $ids): int
+{
+    $ids = array_values(array_filter(array_map('trim', $ids), 'strlen'));
+    if (!$ids) {
+        return 0;
+    }
+
+    $deleted = 0;
+    $pdo->beginTransaction();
+    try {
+        $delTrips  = $pdo->prepare("DELETE FROM trips             WHERE route_id = :id");
+        $delState  = $pdo->prepare("DELETE FROM advisor_state     WHERE route_id = :id");
+        $delTokens = $pdo->prepare("DELETE FROM monitoring_tokens WHERE route_id = :id");
+        $delRoute  = $pdo->prepare("DELETE FROM routes            WHERE id       = :id");
+
+        foreach ($ids as $id) {
+            $delTrips->execute([':id' => $id]);
+            $delState->execute([':id' => $id]);
+            $delTokens->execute([':id' => $id]);
+            $delRoute->execute([':id' => $id]);
+            $deleted += $delRoute->rowCount();
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        jsonError('Delete failed: ' . $e->getMessage(), 500);
+    }
+
+    return $deleted;
+}
+
 function validateEnum(mixed $value, array $allowed, string $default): string
 {
     return in_array($value, $allowed, true) ? (string)$value : $default;
@@ -1186,13 +1227,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // that are inactive. Active, unexpired quick trips are NOT deleted.
 
     if ($action === 'cleanup_quick_trips') {
-        $st = $pdo->prepare("
-            DELETE FROM routes
+        $ids = $pdo->query("
+            SELECT id FROM routes
             WHERE (one_time = 1 AND (one_time_used = 1 OR active = 0))
                OR (active = 0 AND id LIKE 'qt_%')
-        ");
-        $st->execute();
-        $deleted = $st->rowCount();
+        ")->fetchAll(PDO::FETCH_COLUMN);
+
+        $deleted = deleteRoutesWithData($pdo, $ids);
 
         Config::reset();
 
@@ -1209,9 +1250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             jsonError('Route ID is required', 400);
         }
 
-        $st = $pdo->prepare("DELETE FROM routes WHERE id = :id");
-        $st->execute([':id' => $id]);
-        $deleted = $st->rowCount();
+        $deleted = deleteRoutesWithData($pdo, [$id]);
 
         Config::reset();
         $config = Config::load($baseDir);

@@ -39,6 +39,7 @@ try {
     $pdo = new PDO("sqlite:{$dbPath}");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->exec('PRAGMA journal_mode=WAL;');
+    $pdo->exec('PRAGMA busy_timeout=5000;');
     $pdo->exec('PRAGMA foreign_keys=ON;');
 } catch (Exception $e) {
     die("Cannot open database: " . $e->getMessage() . "\n");
@@ -98,8 +99,9 @@ CREATE TABLE IF NOT EXISTS routes (
 ");
 echo "✓ Table: routes\n";
 
-$pdo->exec("
-CREATE TABLE IF NOT EXISTS trips (
+// Column definitions kept in variables so the migration block below can rebuild
+// these tables with the exact same schema.
+$tripsDdl = "
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
     route_id                 TEXT    NOT NULL,
     collected_at             TEXT    NOT NULL,
@@ -117,9 +119,9 @@ CREATE TABLE IF NOT EXISTS trips (
     best_alt_seconds         INTEGER,
     best_alt_summary         TEXT,
     api_status               TEXT DEFAULT 'OK',
-    FOREIGN KEY (route_id) REFERENCES routes(id)
-);
-");
+    FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
+";
+$pdo->exec("CREATE TABLE IF NOT EXISTS trips ({$tripsDdl});");
 echo "✓ Table: trips\n";
 
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_trips_route   ON trips(route_id);");
@@ -128,8 +130,7 @@ $pdo->exec("CREATE INDEX IF NOT EXISTS idx_trips_month   ON trips(route_id, year
 $pdo->exec("CREATE INDEX IF NOT EXISTS idx_trips_date    ON trips(collected_at);");
 echo "✓ Indexes: trips\n";
 
-$pdo->exec("
-CREATE TABLE IF NOT EXISTS advisor_state (
+$advisorStateDdl = "
     route_id              TEXT NOT NULL,
     schedule_key          TEXT NOT NULL,
     date                  TEXT NOT NULL,
@@ -137,9 +138,10 @@ CREATE TABLE IF NOT EXISTS advisor_state (
     recommended_departure TEXT,
     live_duration_seconds INTEGER,
     last_check            TEXT,
-    PRIMARY KEY (route_id, schedule_key, date)
-);
-");
+    PRIMARY KEY (route_id, schedule_key, date),
+    FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
+";
+$pdo->exec("CREATE TABLE IF NOT EXISTS advisor_state ({$advisorStateDdl});");
 echo "✓ Table: advisor_state\n";
 
 // ─── Channel profile tables ───────────────────────────────────────────────────
@@ -215,8 +217,7 @@ CREATE TABLE IF NOT EXISTS alert_profiles (
 ");
 echo "✓ Table: alert_profiles\n";
 
-$pdo->exec("
-CREATE TABLE IF NOT EXISTS monitoring_tokens (
+$monitoringTokensDdl = "
     token        TEXT PRIMARY KEY,
     route_id     TEXT NOT NULL,
     schedule_key TEXT NOT NULL,
@@ -224,9 +225,10 @@ CREATE TABLE IF NOT EXISTS monitoring_tokens (
     arrive_time  TEXT NOT NULL,
     route_label  TEXT NOT NULL,
     expires_at   TEXT NOT NULL,
-    created_at   TEXT NOT NULL
-);
-");
+    created_at   TEXT NOT NULL,
+    FOREIGN KEY (route_id) REFERENCES routes(id) ON DELETE CASCADE
+";
+$pdo->exec("CREATE TABLE IF NOT EXISTS monitoring_tokens ({$monitoringTokensDdl});");
 echo "✓ Table: monitoring_tokens\n";
 
 $pdo->exec("
@@ -261,6 +263,63 @@ try {
 } catch (Exception $e) {
     // Column already exists — no action needed
 }
+
+// Add ON DELETE CASCADE to every table that references routes(id). Older DBs had
+// trips with a plain (RESTRICT) FK and advisor_state / monitoring_tokens with no
+// FK at all, so deleting a route either failed or left orphaned rows that grew
+// the DB forever. SQLite can't ALTER a constraint, so rebuild any table whose
+// definition doesn't already contain "ON DELETE CASCADE".
+//
+// Procedure follows https://sqlite.org/lang_altertable.html#otheralter:
+// foreign_keys OFF (must be outside a transaction) → rebuild inside a txn → check.
+$cascadeTargets = [
+    'trips'             => $tripsDdl,
+    'advisor_state'     => $advisorStateDdl,
+    'monitoring_tokens' => $monitoringTokensDdl,
+];
+
+foreach ($cascadeTargets as $table => $ddl) {
+    $existingSql = $pdo->query(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=" . $pdo->quote($table)
+    )->fetchColumn();
+
+    // Table missing (fresh create handled it) or already cascading → nothing to do.
+    if ($existingSql === false || stripos($existingSql, 'ON DELETE CASCADE') !== false) {
+        continue;
+    }
+
+    // Column list to copy (intersection of old and new columns, in old order).
+    $cols = $pdo->query("PRAGMA table_info({$table})")->fetchAll(PDO::FETCH_COLUMN, 1);
+    $colList = implode(', ', array_map(fn($c) => '"' . $c . '"', $cols));
+
+    $pdo->exec('PRAGMA foreign_keys=OFF');
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec("DROP TABLE IF EXISTS {$table}_new;");
+        $pdo->exec("CREATE TABLE {$table}_new ({$ddl});");
+        $pdo->exec("INSERT INTO {$table}_new ({$colList}) SELECT {$colList} FROM {$table};");
+        $pdo->exec("DROP TABLE {$table};");
+        $pdo->exec("ALTER TABLE {$table}_new RENAME TO {$table};");
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        $pdo->exec('PRAGMA foreign_keys=ON');
+        die("Migration failed rebuilding {$table}: " . $e->getMessage() . "\n");
+    }
+
+    $violations = $pdo->query('PRAGMA foreign_key_check')->fetchAll();
+    $pdo->exec('PRAGMA foreign_keys=ON');
+    if ($violations) {
+        die("Migration left foreign key violations in {$table}; aborting.\n");
+    }
+    echo "✓ Migration: rebuilt {$table} with ON DELETE CASCADE\n";
+}
+
+// trips indexes are dropped along with the table during a rebuild — recreate them.
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_trips_route   ON trips(route_id);");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_trips_day     ON trips(route_id, scheduled_day);");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_trips_month   ON trips(route_id, year, month);");
+$pdo->exec("CREATE INDEX IF NOT EXISTS idx_trips_date    ON trips(collected_at);");
 
 // ─── Seed default settings ────────────────────────────────────────────────────
 
