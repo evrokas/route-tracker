@@ -28,10 +28,10 @@ return [
     'api_max_limit'         => 500,                 // maximum row limit for API queries
 
     // ─── Filesystem ──────────────────────────────────────────────────
-    'dir_permissions'       => 0700,                // data directory permissions
+    'dir_permissions'       => 0770,                // data directory permissions
 
     // ─── Session ─────────────────────────────────────────────────────
-    'session_idle_timeout'  => 3600,                // seconds of inactivity before session expires (1 hour)
+    'session_idle_timeout'  => 30*24*3600,                // seconds of inactivity before session expires (1 hour)
 
     // ─── Advisor buffer thresholds (seconds of stddev) ───────────────
     'buffer_stddev_low'     => 180,                 // below this → 5 min buffer
@@ -43,7 +43,8 @@ return [
     // ─── Debug ───────────────────────────────────────────────────────
     'debug'                 => false,               // enable verbose error output
 
-    // ─── ErnsAuth SSO (leave empty to disable) ──────────────────────────
-    'ernsauth_url'          => 'http://localhost/apps/ernsauth/web/sso-api.php',                  // e.g. 'https://example.com/apps/ernsauth/web/sso-api.php'
-    'ernsauth_api_key'      => '00429715682fa973a67b55b77fe418a4351c7fdd48c272ac5b23a62dcdb0cdfa',                  // shared API key from ErnsAuth admin panel
+    // ---- ERNSAuth SSO
+    'ernsauth_url'		=> 'https://nyx.erns.eu/apps/auth/web/sso-api.php',
+    'ernsauth_api_key'		=> 'ac99bcb1f12fbfeec0d979f36b263e25a1155b26e9e8a8f8be1df3f98e21fa2f',
+
 ];
