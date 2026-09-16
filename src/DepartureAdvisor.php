@@ -232,16 +232,17 @@ class DepartureAdvisor
             case 'planning':
                 return "📋 Departure Planning\n\n" .
                        "Route: {$routeLabel}\n" .
+                       "Recommended departure: {$recommendedDepart}\n" .
                        "Target arrival: {$arriveTime}\n" .
-                       "Traffic looks normal. Leave by {$recommendedDepart} to arrive by {$arriveTime}{$via} ({$liveMin} min{$vsAvg}).\n" .
+                       "Traffic looks normal{$via} ({$liveMin} min{$vsAvg}).\n" .
                        "Buffer: {$bufferMin} min\n\n" .
                        "🧭 {$gmapsUrl}{$monitor}";
 
             case 'window':
                 return "🕐 Departure Window\n\n" .
                        "Route: {$routeLabel}\n" .
-                       "Target arrival: {$arriveTime}\n" .
                        "Recommended departure: {$recommendedDepart}\n" .
+                       "Target arrival: {$arriveTime}\n" .
                        "Live estimate: {$liveMin} min{$via}{$vsAvg}\n\n" .
                        "🧭 {$gmapsUrl}{$monitor}";
 
