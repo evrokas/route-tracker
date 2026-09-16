@@ -55,6 +55,7 @@ if ($reset) {
     $pdo->exec('DROP TABLE IF EXISTS routes;');
     $pdo->exec('DROP TABLE IF EXISTS settings;');
     $pdo->exec('DROP TABLE IF EXISTS alert_profiles;');
+    $pdo->exec('DROP TABLE IF EXISTS exemption_profiles;');
     $pdo->exec('DROP TABLE IF EXISTS telegram_profiles;');
     $pdo->exec('DROP TABLE IF EXISTS email_profiles;');
     $pdo->exec('DROP TABLE IF EXISTS signal_profiles;');
@@ -89,6 +90,7 @@ CREATE TABLE IF NOT EXISTS routes (
     advisor_fixed_buffer INTEGER DEFAULT 10,
     advisor_stages       TEXT    DEFAULT '[\"planning\",\"window\",\"reminder\",\"urgent\",\"last_call\"]',
     alert_profile_ids    TEXT    DEFAULT '[]',
+    exemption_profile_ids TEXT   DEFAULT '[]',
     active               INTEGER DEFAULT 1,
     one_time             INTEGER DEFAULT 0,
     one_time_used        INTEGER DEFAULT 0,
@@ -218,6 +220,18 @@ CREATE TABLE IF NOT EXISTS alert_profiles (
 echo "✓ Table: alert_profiles\n";
 
 $pdo->exec("
+CREATE TABLE IF NOT EXISTS exemption_profiles (
+    id         TEXT PRIMARY KEY,
+    label      TEXT NOT NULL,
+    dates      TEXT NOT NULL DEFAULT '[]',
+    enabled    INTEGER DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT
+);
+");
+echo "✓ Table: exemption_profiles\n";
+
+$pdo->exec("
 CREATE TABLE IF NOT EXISTS monitoring_tokens (
     token        TEXT PRIMARY KEY,
     route_id     TEXT NOT NULL,
@@ -274,6 +288,13 @@ try {
 try {
     $pdo->exec("ALTER TABLE routes ADD COLUMN return_time TEXT DEFAULT NULL");
     echo "✓ Migration: added return_time to routes\n";
+} catch (Exception $e) {
+    // Column already exists — no action needed
+}
+
+try {
+    $pdo->exec("ALTER TABLE routes ADD COLUMN exemption_profile_ids TEXT DEFAULT '[]'");
+    echo "✓ Migration: added exemption_profile_ids to routes\n";
 } catch (Exception $e) {
     // Column already exists — no action needed
 }

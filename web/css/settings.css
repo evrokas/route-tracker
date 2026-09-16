@@ -68,6 +68,7 @@
 .field-group input[type=number],
 .field-group input[type=email],
 .field-group select,
+.field-group textarea,
 input[type=text].sched-time {
   width: 100%;
   background: var(--card);
@@ -81,8 +82,14 @@ input[type=text].sched-time {
   transition: border-color .15s;
 }
 
+.field-group textarea {
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+
 .field-group input:focus,
-.field-group select:focus { border-color: var(--accent); }
+.field-group select:focus,
+.field-group textarea:focus { border-color: var(--accent); }
 
 .field-row {
   display: flex;

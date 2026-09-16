@@ -54,7 +54,15 @@ foreach ($config->getActiveRoutes() as $r) {
 
 // ─── Process each active route ────────────────────────────────────────────────
 
+$today = date('Y-m-d');
+
 foreach ($routes as $route) {
+    // Exemption profiles: skip alerts and collection entirely on an exempted date
+    // (collection is also already excluded from $routesInWindow for this date).
+    if ($config->isRouteExemptOn($route, $today)) {
+        continue;
+    }
+
     // 1. Advisor checks (arrive-mode schedules only)
     if (!empty($route['advisor_enabled'])) {
         foreach ($route['schedule'] ?? [] as $sched) {

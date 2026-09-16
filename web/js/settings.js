@@ -164,7 +164,7 @@ function renderRouteList(routes) {
       <td>${escHtml(r.label)}</td>
       <td style="font-size:12px;color:var(--muted)">${escHtml(r.origin||'')} → ${escHtml(r.destination||'')}</td>
       <td>${profileBadges}</td>
-      <td>${r.advisor_enabled ? '✓' : '–'}${r.return_enabled ? ' <span class="ap-badge" title="Return trip alerts enabled">↩ return</span>' : ''}</td>
+      <td>${r.advisor_enabled ? '✓' : '–'}${r.return_enabled ? ' <span class="ap-badge" title="Return trip alerts enabled">↩ return</span>' : ''}${(r.exemption_profile_ids||[]).length ? ` <span class="ap-badge" title="Exemption profiles assigned">⛔ ${r.exemption_profile_ids.length}</span>` : ''}</td>
       <td>
         <button class="btn-tiny" data-action="edit-route" data-id="${escHtml(r.id)}">Edit</button>
         <button class="btn-tiny btn-danger" data-action="delete-route" data-id="${escHtml(r.id)}">Delete</button>
@@ -202,6 +202,7 @@ async function showRouteForm(route) {
     advisor_stages: ['planning','window','reminder','urgent','last_call'],
     alert_profile_ids: [], active: true,
     return_enabled: false, return_time: '',
+    exemption_profile_ids: [],
   };
 
   const stageOptions = ['planning','window','reminder','urgent','last_call'];
@@ -221,6 +222,20 @@ async function showRouteForm(route) {
           ${escHtml(ap.label)}${ap.enabled ? '' : ' <span style="color:var(--muted)">(disabled)</span>'}
         </label>`).join('')
     : '<span style="color:var(--muted);font-size:13px">No alert profiles defined yet. Create one in the Alerts tab.</span>';
+
+  // Load exemption profiles for assignment checkboxes
+  if (!_allExemptionProfiles) {
+    const epd = await apiGet({ action: 'exemption_profiles_list' });
+    _allExemptionProfiles = epd?.exemption_profiles || [];
+  }
+  const assignedExemptionIds = Array.isArray(r.exemption_profile_ids) ? r.exemption_profile_ids : [];
+  const exemptionProfileCheckboxes = _allExemptionProfiles.length
+    ? _allExemptionProfiles.map(ep => `
+        <label class="checkbox-label">
+          <input type="checkbox" name="exemption_profile_id" value="${escHtml(ep.id)}" ${assignedExemptionIds.includes(ep.id) ? 'checked' : ''}>
+          ${escHtml(ep.label)}${ep.enabled ? '' : ' <span style="color:var(--muted)">(disabled)</span>'}
+        </label>`).join('')
+    : '<span style="color:var(--muted);font-size:13px">No exemption profiles defined yet. Create one in the Alerts tab.</span>';
 
   const stageCheckboxes = stageOptions.map(st => `
     <label class="checkbox-label">
@@ -325,6 +340,12 @@ async function showRouteForm(route) {
         <div class="checkbox-row">${alertProfileCheckboxes}</div>
       </div>
 
+      <div class="field-group">
+        <label>Exemption Profiles</label>
+        <div class="checkbox-row">${exemptionProfileCheckboxes}</div>
+        <div class="field-hint">On any date in an assigned profile, this route is skipped entirely — no tracking, no alerts.</div>
+      </div>
+
       <label class="checkbox-label">
         <input type="checkbox" id="rf_active" ${r.active ? 'checked' : ''}>
         Active (include in scheduled collection)
@@ -396,8 +417,9 @@ async function saveRoute(originalId) {
     return;
   }
 
-  const alertProfileIds = [...document.querySelectorAll('input[name="alert_profile_id"]:checked')].map(el => el.value);
-  const advisorStages   = [...document.querySelectorAll('input[name="adv_stage"]:checked')].map(el => el.value);
+  const alertProfileIds     = [...document.querySelectorAll('input[name="alert_profile_id"]:checked')].map(el => el.value);
+  const exemptionProfileIds = [...document.querySelectorAll('input[name="exemption_profile_id"]:checked')].map(el => el.value);
+  const advisorStages       = [...document.querySelectorAll('input[name="adv_stage"]:checked')].map(el => el.value);
 
   const returnEnabled = document.getElementById('rf_return_enabled')?.checked ? 1 : 0;
   const returnTime    = getVal('rf_return_time').trim();
@@ -420,6 +442,7 @@ async function saveRoute(originalId) {
     advisor_fixed_buffer: parseInt(getVal('rf_adv_fixed')) || 10,
     advisor_stages:       advisorStages,
     alert_profile_ids:    alertProfileIds,
+    exemption_profile_ids: exemptionProfileIds,
     active:               document.getElementById('rf_active')?.checked ? 1 : 0,
     return_enabled:       returnEnabled,
     return_time:          returnTime,
@@ -438,14 +461,16 @@ function cancelRouteForm() {
   const wrap = document.getElementById('routeFormWrap');
   if (wrap) { wrap.style.display = 'none'; wrap.innerHTML = ''; }
   closeAllAddrDropdowns();
-  _allAlertProfiles = null; // force reload next time form opens
+  _allAlertProfiles = null;     // force reload next time form opens
+  _allExemptionProfiles = null; // force reload next time form opens
 }
 
 // ─── Address picker helpers ───────────────────────────────────────────────────
 
 let _addrCache = null;          // fetched once per form open
-let _allChannelProfiles = null;  // { telegram: [], email: [], signal: [], viber: [] }
-let _allAlertProfiles   = null;  // [...]
+let _allChannelProfiles = null;    // { telegram: [], email: [], signal: [], viber: [] }
+let _allAlertProfiles     = null;  // [...]
+let _allExemptionProfiles = null;  // [...]
 
 async function _fetchAddresses() {
   if (_addrCache !== null) return _addrCache;
@@ -547,6 +572,11 @@ async function loadAlerts() {
   const apData = await apiGet({ action: 'alert_profiles_list' });
   _allAlertProfiles = apData?.alert_profiles || [];
   renderAlertProfileTable(_allAlertProfiles);
+
+  // Load exemption profiles
+  const epData = await apiGet({ action: 'exemption_profiles_list' });
+  _allExemptionProfiles = epData?.exemption_profiles || [];
+  renderExemptionProfileTable(_allExemptionProfiles);
 }
 
 async function saveAlertThresholds() {
@@ -1010,6 +1040,157 @@ async function testAlertProfile(id, label) {
   btn.disabled = false;
   btn.textContent = 'Test';
   alert(result?.ok ? `Test sent via "${label}" successfully.` : `Failed: ${result?.error || result?.message || 'unknown error'}`);
+}
+
+// ─── Exemption Profiles ───────────────────────────────────────────────────
+
+function renderExemptionProfileTable(profiles) {
+  const box = document.getElementById('exemptionProfilesTable');
+  if (!box) return;
+  if (!profiles.length) {
+    box.innerHTML = '<div class="cp-empty">No exemption profiles yet. Click "+ Add Profile" to create one.</div>';
+    return;
+  }
+  let html = '<table class="cp-table"><thead><tr><th>Label</th><th>Dates</th><th>Enabled</th><th>Actions</th></tr></thead><tbody>';
+  for (const ep of profiles) {
+    const dates = ep.dates || [];
+    const datesPreview = dates.length
+      ? (dates.length <= 3 ? dates.join(', ') : `${dates.slice(0, 3).join(', ')} +${dates.length - 3} more`)
+      : '—';
+    html += `<tr>
+      <td>${escHtml(ep.label)}</td>
+      <td style="font-size:12px;color:var(--muted)">${escHtml(datesPreview)}</td>
+      <td>${ep.enabled ? 'Yes' : 'No'}</td>
+      <td>
+        <button class="btn-tiny" data-action="edit-ep" data-id="${escHtml(ep.id)}">Edit</button>
+        <button class="btn-tiny btn-danger" data-action="delete-ep" data-id="${escHtml(ep.id)}">Delete</button>
+      </td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  box.innerHTML = html;
+
+  box.querySelectorAll('[data-action="edit-ep"]').forEach(btn => {
+    btn.addEventListener('click', () => editExemptionProfile(btn.dataset.id));
+  });
+  box.querySelectorAll('[data-action="delete-ep"]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ep = profiles.find(x => x.id === btn.dataset.id);
+      if (ep) deleteExemptionProfile(ep.id, ep.label);
+    });
+  });
+}
+
+function addExemptionProfile() {
+  showExemptionProfileForm(null);
+}
+
+async function editExemptionProfile(id) {
+  const profile = (_allExemptionProfiles || []).find(ep => ep.id === id);
+  showExemptionProfileForm(profile || null);
+}
+
+function showExemptionProfileForm(profile) {
+  const box = document.getElementById('exemptionProfileForm');
+  if (!box) return;
+  box.style.display = 'block';
+
+  const ep = profile || { id: '', label: '', dates: [], enabled: true };
+  const originalId = profile?.id || '';
+
+  box.innerHTML = `
+    <div class="cp-form">
+      <div class="field-row-2">
+        <div class="field-group">
+          <label>Profile ID (slug)</label>
+          <input type="text" id="epf_id" value="${escHtml(ep.id)}" placeholder="greek_holidays" ${profile ? 'readonly' : ''}>
+        </div>
+        <div class="field-group">
+          <label>Label</label>
+          <input type="text" id="epf_label" value="${escHtml(ep.label)}" placeholder="Greek Public Holidays">
+        </div>
+      </div>
+      <div class="field-group">
+        <label>Dates</label>
+        <textarea id="epf_dates" rows="6" placeholder="2026-01-01&#10;2026-03-25&#10;2026-05-01">${escHtml((ep.dates || []).join('\n'))}</textarea>
+        <div class="field-hint">One date per line (or comma-separated), format YYYY-MM-DD. Routes with this profile assigned won't be tracked or alerted on these dates.</div>
+      </div>
+      <label class="checkbox-label" style="margin-top:8px">
+        <input type="checkbox" id="epf_enabled" ${ep.enabled ? 'checked' : ''}> Enabled
+      </label>
+      <div class="form-actions" style="margin-top:12px">
+        <button class="btn-primary" id="btn-save-ep">Save</button>
+        <button class="btn-secondary" onclick="cancelExemptionProfileForm()">Cancel</button>
+        <span id="epfStatus" class="save-status"></span>
+      </div>
+    </div>`;
+
+  box.querySelector('#btn-save-ep').addEventListener('click', () => saveExemptionProfile(originalId));
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function getDatesFromTextarea() {
+  const raw = getVal('epf_dates');
+  return raw
+    .split(/[\n,]/)
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+function cancelExemptionProfileForm() {
+  const box = document.getElementById('exemptionProfileForm');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+
+async function saveExemptionProfile(originalId) {
+  const id    = getVal('epf_id').trim();
+  const label = getVal('epf_label').trim();
+  if (!id || !label) {
+    showStatus('epfStatus', 'ID and Label are required', false);
+    return;
+  }
+
+  const dates = getDatesFromTextarea();
+  const badDate = dates.find(d => !/^\d{4}-\d{2}-\d{2}$/.test(d));
+  if (badDate) {
+    showStatus('epfStatus', `Invalid date "${badDate}" — expected YYYY-MM-DD`, false);
+    return;
+  }
+
+  const data = {
+    id,
+    label,
+    original_id: originalId,
+    dates,
+    enabled: document.getElementById('epf_enabled')?.checked ? 1 : 0,
+  };
+
+  const result = await apiPost('exemption_profiles_save', data);
+  if (result?.ok) {
+    showStatus('epfStatus', 'Saved!', true);
+    _allExemptionProfiles = null;
+    setTimeout(async () => {
+      cancelExemptionProfileForm();
+      const epd = await apiGet({ action: 'exemption_profiles_list' });
+      _allExemptionProfiles = epd?.exemption_profiles || [];
+      renderExemptionProfileTable(_allExemptionProfiles);
+    }, 600);
+  } else {
+    showStatus('epfStatus', 'Error: ' + (result?.error || '?'), false);
+  }
+}
+
+async function deleteExemptionProfile(id, label) {
+  if (!confirm(`Delete exemption profile "${label}"?\nIt must not be assigned to any route.`)) return;
+  const result = await apiPost('exemption_profiles_delete', { id });
+  if (result?.ok) {
+    _allExemptionProfiles = null;
+    const epd = await apiGet({ action: 'exemption_profiles_list' });
+    _allExemptionProfiles = epd?.exemption_profiles || [];
+    renderExemptionProfileTable(_allExemptionProfiles);
+  } else {
+    alert('Error: ' + (result?.error || 'Delete failed'));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

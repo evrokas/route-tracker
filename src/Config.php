@@ -302,13 +302,14 @@ class Config
     /** Decode JSON fields and normalise a route DB row. */
     private function decodeRoute(array $row): array
     {
-        $row['schedule']          = json_decode($row['schedule']          ?? '[]', true) ?: [];
-        $row['advisor_stages']    = json_decode($row['advisor_stages']    ?? '[]', true) ?: [];
-        $row['alert_profile_ids'] = json_decode($row['alert_profile_ids'] ?? '[]', true) ?: [];
-        $row['advisor_enabled']   = (bool)(int)($row['advisor_enabled']   ?? 0);
-        $row['active']            = (bool)(int)($row['active']            ?? 1);
-        $row['return_enabled']    = (bool)(int)($row['return_enabled']    ?? 0);
-        $row['return_time']       = $row['return_time'] ?? '';
+        $row['schedule']              = json_decode($row['schedule']              ?? '[]', true) ?: [];
+        $row['advisor_stages']        = json_decode($row['advisor_stages']        ?? '[]', true) ?: [];
+        $row['alert_profile_ids']     = json_decode($row['alert_profile_ids']     ?? '[]', true) ?: [];
+        $row['exemption_profile_ids'] = json_decode($row['exemption_profile_ids'] ?? '[]', true) ?: [];
+        $row['advisor_enabled']       = (bool)(int)($row['advisor_enabled']       ?? 0);
+        $row['active']                = (bool)(int)($row['active']                ?? 1);
+        $row['return_enabled']        = (bool)(int)($row['return_enabled']        ?? 0);
+        $row['return_time']           = $row['return_time'] ?? '';
         return $row;
     }
 
@@ -347,9 +348,15 @@ class Config
         $before  = $this->getCollectionWindowBefore();
         $after   = $this->getCollectionWindowAfter();
 
-        $active = [];
+        $active  = [];
+        $curDate = date('Y-m-d', $now);
 
         foreach ($this->getAllActiveRoutes() as $route) {
+            // Exemption profiles: skip both legs entirely on an exempted date
+            if ($this->isRouteExemptOn($route, $curDate)) {
+                continue;
+            }
+
             foreach ($route['schedule'] ?? [] as $sched) {
                 $days = $this->parseDays($sched['days'] ?? '');
                 if (!in_array($curDay, $days, true)) {
@@ -614,6 +621,84 @@ class Config
             }
         }
         return $profiles;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Exemption profile lookups
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** Returns one exemption profile (enabled only). Dates decoded to array. */
+    public function getExemptionProfile(string $id): ?array
+    {
+        try {
+            $st = $this->pdo->prepare("SELECT * FROM exemption_profiles WHERE id = :id AND enabled = 1");
+            $st->execute([':id' => $id]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return null;
+            $row['dates']   = json_decode($row['dates'] ?? '[]', true) ?: [];
+            $row['enabled'] = (bool)(int)$row['enabled'];
+            return $row;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+
+    /** Returns all exemption profiles (including disabled), ordered by label. */
+    public function getAllExemptionProfiles(): array
+    {
+        try {
+            $rows = $this->pdo->query("SELECT * FROM exemption_profiles ORDER BY label")
+                              ->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            return [];
+        }
+        return array_map(function ($row) {
+            $row['dates']   = json_decode($row['dates'] ?? '[]', true) ?: [];
+            $row['enabled'] = (bool)(int)$row['enabled'];
+            return $row;
+        }, $rows);
+    }
+
+    /** True if $date ("Y-m-d") falls in any enabled exemption profile assigned to the route. */
+    public function isRouteExemptOn(array $route, string $date): bool
+    {
+        foreach ($route['exemption_profile_ids'] ?? [] as $pid) {
+            $p = $this->getExemptionProfile($pid);
+            if ($p && in_array($date, $p['dates'], true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public function saveExemptionProfile(array $data): void
+    {
+        $now   = date('Y-m-d H:i:s');
+        $dates = is_array($data['dates'] ?? null)
+            ? json_encode(array_values(array_unique($data['dates'])), JSON_UNESCAPED_UNICODE)
+            : ($data['dates'] ?? '[]');
+
+        $st = $this->pdo->prepare("
+            INSERT INTO exemption_profiles (id, label, dates, enabled, created_at, updated_at)
+            VALUES (:id, :label, :dates, :enabled, :created_at, :updated_at)
+            ON CONFLICT(id) DO UPDATE SET
+                label = excluded.label, dates = excluded.dates,
+                enabled = excluded.enabled, updated_at = excluded.updated_at
+        ");
+        $st->execute([
+            ':id'         => $data['id'],
+            ':label'      => $data['label'],
+            ':dates'      => $dates,
+            ':enabled'    => (int)(bool)($data['enabled'] ?? 1),
+            ':created_at' => $now,
+            ':updated_at' => $now,
+        ]);
+    }
+
+    public function deleteExemptionProfile(string $id): void
+    {
+        $st = $this->pdo->prepare("DELETE FROM exemption_profiles WHERE id = :id");
+        $st->execute([':id' => $id]);
     }
 
     /**

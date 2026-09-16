@@ -237,6 +237,19 @@ $currentTz = $config->getTimezone();
     <div id="alertProfilesTable"></div>
     <div id="alertProfileForm" style="display:none"></div>
   </div>
+
+  <!-- Exemption Profiles -->
+  <div class="settings-section">
+    <div class="section-title-row">
+      <span class="section-title">Exemption Profiles</span>
+      <button class="btn-primary" onclick="addExemptionProfile()">+ Add Profile</button>
+    </div>
+    <div class="field-hint" style="margin-bottom:12px">
+      Named sets of dates (holidays, vacations, etc). Assign one or more to a route to skip tracking and alerts on those dates.
+    </div>
+    <div id="exemptionProfilesTable"></div>
+    <div id="exemptionProfileForm" style="display:none"></div>
+  </div>
 </template>
 
 <template id="tplSystem">

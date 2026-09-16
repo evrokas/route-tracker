@@ -421,6 +421,11 @@ class DepartureAdvisor
                 continue;
             }
 
+            // Exemption profiles: hide the card entirely on an exempted date
+            if ($this->config->isRouteExemptOn($route, $today)) {
+                continue;
+            }
+
             foreach ($route['schedule'] ?? [] as $sched) {
                 if (!isset($sched['arrive'])) {
                     continue;

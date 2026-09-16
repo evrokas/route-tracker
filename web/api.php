@@ -27,6 +27,7 @@
  *   ?action=address_history
  *   ?action=channel_profiles_list
  *   ?action=alert_profiles_list
+ *   ?action=exemption_profiles_list
  *
  * POST actions (JSON body or form data):
  *   ?action=save_setting          { key, value }  or  { settings: {key:value,...} }
@@ -42,6 +43,8 @@
  *   ?action=alert_profiles_save   { id, label, channels:[{type,profile_id},...], enabled }
  *   ?action=alert_profiles_delete { id }
  *   ?action=alert_profiles_test   { id }
+ *   ?action=exemption_profiles_save   { id, label, dates:["YYYY-MM-DD",...], enabled }
+ *   ?action=exemption_profiles_delete { id }
  *
  * Global GET filters (for data queries):
  *   &route_id=xxx
@@ -172,6 +175,7 @@ if ($action === 'route_list') {
             'advisor_fixed_buffer' => (int)($r['advisor_fixed_buffer'] ?? 10),
             'advisor_stages'       => $r['advisor_stages'] ?? ['planning','window','reminder','urgent','last_call'],
             'alert_profile_ids'    => $r['alert_profile_ids'] ?? [],
+            'exemption_profile_ids' => $r['exemption_profile_ids'] ?? [],
             'active'               => (bool)(int)($r['active'] ?? 1),
             'return_enabled'       => (bool)(int)($r['return_enabled'] ?? 0),
             'return_time'          => $r['return_time'] ?? '',
@@ -189,7 +193,7 @@ if ($action === 'route_list') {
                 'advisor_start_before' => 90, 'advisor_buffer_mode' => 'auto',
                 'advisor_fixed_buffer' => 10,
                 'advisor_stages' => ['planning','window','reminder','urgent','last_call'],
-                'alert_profile_ids' => [], 'active' => true,
+                'alert_profile_ids' => [], 'exemption_profile_ids' => [], 'active' => true,
                 'return_enabled' => false, 'return_time' => '',
             ], $rows);
         } catch (Exception $e) {}
@@ -885,9 +889,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             jsonError('Return time must be in HH:MM format when return trip is enabled', 400);
         }
 
-        $schedule        = $body['schedule']          ?? [];
-        $alertProfileIds = $body['alert_profile_ids'] ?? [];
-        $advisorStages   = $body['advisor_stages']    ?? ['planning','window','reminder','urgent','last_call'];
+        $schedule            = $body['schedule']              ?? [];
+        $alertProfileIds     = $body['alert_profile_ids']     ?? [];
+        $exemptionProfileIds = $body['exemption_profile_ids'] ?? [];
+        $advisorStages       = $body['advisor_stages']        ?? ['planning','window','reminder','urgent','last_call'];
 
         $now = date('Y-m-d H:i:s');
 
@@ -910,6 +915,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     advisor_fixed_buffer = :advisor_fixed_buffer,
                     advisor_stages = :advisor_stages,
                     alert_profile_ids = :alert_profile_ids,
+                    exemption_profile_ids = :exemption_profile_ids,
                     active = :active,
                     return_enabled = :return_enabled,
                     return_time = :return_time,
@@ -921,35 +927,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO routes
                     (id, label, origin, destination, travel_mode, schedule,
                      advisor_enabled, advisor_start_before, advisor_buffer_mode,
-                     advisor_fixed_buffer, advisor_stages, alert_profile_ids, active,
+                     advisor_fixed_buffer, advisor_stages, alert_profile_ids, exemption_profile_ids, active,
                      return_enabled, return_time,
                      created_at, updated_at)
                 VALUES
                     (:id, :label, :origin, :destination, :travel_mode, :schedule,
                      :advisor_enabled, :advisor_start_before, :advisor_buffer_mode,
-                     :advisor_fixed_buffer, :advisor_stages, :alert_profile_ids, :active,
+                     :advisor_fixed_buffer, :advisor_stages, :alert_profile_ids, :exemption_profile_ids, :active,
                      :return_enabled, :return_time,
                      :created_at, :updated_at)
             ");
         }
 
         $params = [
-            ':id'                   => $id,
-            ':label'                => $label,
-            ':origin'               => $origin,
-            ':destination'          => $destination,
-            ':travel_mode'          => $body['travel_mode']          ?? 'driving',
-            ':schedule'             => json_encode(is_array($schedule) ? $schedule : []),
-            ':advisor_enabled'      => (int)(bool)($body['advisor_enabled'] ?? 0),
-            ':advisor_start_before' => (int)($body['advisor_start_before'] ?? 90),
-            ':advisor_buffer_mode'  => $body['advisor_buffer_mode']   ?? 'auto',
-            ':advisor_fixed_buffer' => (int)($body['advisor_fixed_buffer'] ?? 10),
-            ':advisor_stages'       => json_encode(is_array($advisorStages) ? $advisorStages : []),
-            ':alert_profile_ids'    => json_encode(is_array($alertProfileIds) ? $alertProfileIds : []),
-            ':active'               => (int)(bool)($body['active'] ?? 1),
-            ':return_enabled'       => $returnEnabled,
-            ':return_time'          => $returnEnabled ? $returnTime : null,
-            ':updated_at'           => $now,
+            ':id'                     => $id,
+            ':label'                  => $label,
+            ':origin'                 => $origin,
+            ':destination'            => $destination,
+            ':travel_mode'            => $body['travel_mode']          ?? 'driving',
+            ':schedule'               => json_encode(is_array($schedule) ? $schedule : []),
+            ':advisor_enabled'        => (int)(bool)($body['advisor_enabled'] ?? 0),
+            ':advisor_start_before'   => (int)($body['advisor_start_before'] ?? 90),
+            ':advisor_buffer_mode'    => $body['advisor_buffer_mode']   ?? 'auto',
+            ':advisor_fixed_buffer'   => (int)($body['advisor_fixed_buffer'] ?? 10),
+            ':advisor_stages'         => json_encode(is_array($advisorStages) ? $advisorStages : []),
+            ':alert_profile_ids'      => json_encode(is_array($alertProfileIds) ? $alertProfileIds : []),
+            ':exemption_profile_ids'  => json_encode(is_array($exemptionProfileIds) ? $exemptionProfileIds : []),
+            ':active'                 => (int)(bool)($body['active'] ?? 1),
+            ':return_enabled'         => $returnEnabled,
+            ':return_time'            => $returnEnabled ? $returnTime : null,
+            ':updated_at'             => $now,
         ];
 
         if (!$isUpdate) {
@@ -1168,6 +1175,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result   = $alertMgr->sendTestAlertProfile($id);
         jsonOut($result);
     }
+
+    // ─── exemption_profiles_save ─────────────────────────────────────────────
+
+    if ($action === 'exemption_profiles_save') {
+        $body = getPostData();
+        $id   = trim($body['id'] ?? '');
+
+        if (!$id || !preg_match('/^[a-z0-9_-]+$/', $id)) {
+            jsonError('Profile ID must be lowercase alphanumeric/underscore/dash', 400);
+        }
+        if (empty($body['label'])) {
+            jsonError('label is required', 400);
+        }
+
+        $dates = is_array($body['dates'] ?? null) ? $body['dates'] : [];
+        $dates = array_map('trim', $dates);
+        foreach ($dates as $d) {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
+                jsonError("Invalid date '{$d}' — expected YYYY-MM-DD", 400);
+            }
+            [$y, $m, $dd] = explode('-', $d);
+            if (!checkdate((int)$m, (int)$dd, (int)$y)) {
+                jsonError("Invalid calendar date '{$d}'", 400);
+            }
+        }
+
+        $config->saveExemptionProfile(array_merge($body, ['dates' => $dates]));
+        jsonOut(['ok' => true, 'id' => $id]);
+    }
+
+    // ─── exemption_profiles_delete ───────────────────────────────────────────
+
+    if ($action === 'exemption_profiles_delete') {
+        $body = getPostData();
+        $id   = trim($body['id'] ?? '');
+
+        if (!$id) {
+            jsonError('id is required', 400);
+        }
+
+        // Guard: cannot delete if assigned to a route
+        foreach ($config->getAllRoutes() as $route) {
+            if (in_array($id, $route['exemption_profile_ids'] ?? [], true)) {
+                jsonError("Cannot delete: profile '{$id}' is assigned to route '{$route['id']}'", 409);
+            }
+        }
+
+        $config->deleteExemptionProfile($id);
+        jsonOut(['ok' => true]);
+    }
 }
 
 // ─── channel_profiles_list ────────────────────────────────────────────────────
@@ -1180,6 +1237,12 @@ if ($action === 'channel_profiles_list') {
 
 if ($action === 'alert_profiles_list') {
     jsonOut(['alert_profiles' => $config->getAllAlertProfiles(), 'generated_at' => date('c')]);
+}
+
+// ─── exemption_profiles_list ───────────────────────────────────────────────────
+
+if ($action === 'exemption_profiles_list') {
+    jsonOut(['exemption_profiles' => $config->getAllExemptionProfiles(), 'generated_at' => date('c')]);
 }
 
 // ─── Unknown action ───────────────────────────────────────────────────────────
