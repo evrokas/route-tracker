@@ -173,6 +173,8 @@ if ($action === 'route_list') {
             'advisor_stages'       => $r['advisor_stages'] ?? ['planning','window','reminder','urgent','last_call'],
             'alert_profile_ids'    => $r['alert_profile_ids'] ?? [],
             'active'               => (bool)(int)($r['active'] ?? 1),
+            'return_enabled'       => (bool)(int)($r['return_enabled'] ?? 0),
+            'return_time'          => $r['return_time'] ?? '',
         ];
     }, $routes);
 
@@ -188,6 +190,7 @@ if ($action === 'route_list') {
                 'advisor_fixed_buffer' => 10,
                 'advisor_stages' => ['planning','window','reminder','urgent','last_call'],
                 'alert_profile_ids' => [], 'active' => true,
+                'return_enabled' => false, 'return_time' => '',
             ], $rows);
         } catch (Exception $e) {}
     }
@@ -876,6 +879,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             jsonError('label, origin, and destination are required', 400);
         }
 
+        $returnEnabled = (int)(bool)($body['return_enabled'] ?? 0);
+        $returnTime    = trim($body['return_time'] ?? '');
+        if ($returnEnabled && !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $returnTime)) {
+            jsonError('Return time must be in HH:MM format when return trip is enabled', 400);
+        }
+
         $schedule        = $body['schedule']          ?? [];
         $alertProfileIds = $body['alert_profile_ids'] ?? [];
         $advisorStages   = $body['advisor_stages']    ?? ['planning','window','reminder','urgent','last_call'];
@@ -902,6 +911,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     advisor_stages = :advisor_stages,
                     alert_profile_ids = :alert_profile_ids,
                     active = :active,
+                    return_enabled = :return_enabled,
+                    return_time = :return_time,
                     updated_at = :updated_at
                 WHERE id = :id
             ");
@@ -911,11 +922,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (id, label, origin, destination, travel_mode, schedule,
                      advisor_enabled, advisor_start_before, advisor_buffer_mode,
                      advisor_fixed_buffer, advisor_stages, alert_profile_ids, active,
+                     return_enabled, return_time,
                      created_at, updated_at)
                 VALUES
                     (:id, :label, :origin, :destination, :travel_mode, :schedule,
                      :advisor_enabled, :advisor_start_before, :advisor_buffer_mode,
                      :advisor_fixed_buffer, :advisor_stages, :alert_profile_ids, :active,
+                     :return_enabled, :return_time,
                      :created_at, :updated_at)
             ");
         }
@@ -934,6 +947,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':advisor_stages'       => json_encode(is_array($advisorStages) ? $advisorStages : []),
             ':alert_profile_ids'    => json_encode(is_array($alertProfileIds) ? $alertProfileIds : []),
             ':active'               => (int)(bool)($body['active'] ?? 1),
+            ':return_enabled'       => $returnEnabled,
+            ':return_time'          => $returnEnabled ? $returnTime : null,
             ':updated_at'           => $now,
         ];
 

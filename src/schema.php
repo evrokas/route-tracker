@@ -92,6 +92,8 @@ CREATE TABLE IF NOT EXISTS routes (
     active               INTEGER DEFAULT 1,
     one_time             INTEGER DEFAULT 0,
     one_time_used        INTEGER DEFAULT 0,
+    return_enabled       INTEGER DEFAULT 0,
+    return_time          TEXT    DEFAULT NULL,
     created_at           TEXT,
     updated_at           TEXT
 );
@@ -258,6 +260,20 @@ try {
 try {
     $pdo->exec("ALTER TABLE routes ADD COLUMN one_time_used INTEGER DEFAULT 0");
     echo "✓ Migration: added one_time_used to routes\n";
+} catch (Exception $e) {
+    // Column already exists — no action needed
+}
+
+try {
+    $pdo->exec("ALTER TABLE routes ADD COLUMN return_enabled INTEGER DEFAULT 0");
+    echo "✓ Migration: added return_enabled to routes\n";
+} catch (Exception $e) {
+    // Column already exists — no action needed
+}
+
+try {
+    $pdo->exec("ALTER TABLE routes ADD COLUMN return_time TEXT DEFAULT NULL");
+    echo "✓ Migration: added return_time to routes\n";
 } catch (Exception $e) {
     // Column already exists — no action needed
 }

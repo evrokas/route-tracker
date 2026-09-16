@@ -164,7 +164,7 @@ function renderRouteList(routes) {
       <td>${escHtml(r.label)}</td>
       <td style="font-size:12px;color:var(--muted)">${escHtml(r.origin||'')} → ${escHtml(r.destination||'')}</td>
       <td>${profileBadges}</td>
-      <td>${r.advisor_enabled ? '✓' : '–'}</td>
+      <td>${r.advisor_enabled ? '✓' : '–'}${r.return_enabled ? ' <span class="ap-badge" title="Return trip alerts enabled">↩ return</span>' : ''}</td>
       <td>
         <button class="btn-tiny" data-action="edit-route" data-id="${escHtml(r.id)}">Edit</button>
         <button class="btn-tiny btn-danger" data-action="delete-route" data-id="${escHtml(r.id)}">Delete</button>
@@ -201,6 +201,7 @@ async function showRouteForm(route) {
     advisor_buffer_mode: 'auto', advisor_fixed_buffer: 10,
     advisor_stages: ['planning','window','reminder','urgent','last_call'],
     alert_profile_ids: [], active: true,
+    return_enabled: false, return_time: '',
   };
 
   const stageOptions = ['planning','window','reminder','urgent','last_call'];
@@ -304,6 +305,18 @@ async function showRouteForm(route) {
             <label>Alert stages</label>
             <div class="checkbox-row">${stageCheckboxes}</div>
           </div>
+          <div class="field-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="rf_return_enabled" ${r.return_enabled ? 'checked' : ''}
+                     onchange="document.getElementById('rf_return_time_wrap').style.display = this.checked ? '' : 'none'">
+              Enable return trip alerts
+            </label>
+            <div class="field-hint">Also alerts for the reverse leg (destination → origin), on the same scheduled days, arriving back by the time below.</div>
+          </div>
+          <div class="field-group" id="rf_return_time_wrap" style="${r.return_enabled ? '' : 'display:none'}">
+            <label>Return arrival time (HH:MM)</label>
+            <input type="text" id="rf_return_time" value="${escHtml(r.return_time || '')}" placeholder="HH:MM" maxlength="5" pattern="\\d{2}:\\d{2}" oninput="autoColonTime(this)">
+          </div>
         </div>
       </details>
 
@@ -386,6 +399,14 @@ async function saveRoute(originalId) {
   const alertProfileIds = [...document.querySelectorAll('input[name="alert_profile_id"]:checked')].map(el => el.value);
   const advisorStages   = [...document.querySelectorAll('input[name="adv_stage"]:checked')].map(el => el.value);
 
+  const returnEnabled = document.getElementById('rf_return_enabled')?.checked ? 1 : 0;
+  const returnTime    = getVal('rf_return_time').trim();
+
+  if (returnEnabled && !/^([01]\d|2[0-3]):[0-5]\d$/.test(returnTime)) {
+    showStatus('routeFormStatus', 'Return time must be in HH:MM format', false);
+    return;
+  }
+
   const route = {
     id,
     label,
@@ -400,6 +421,8 @@ async function saveRoute(originalId) {
     advisor_stages:       advisorStages,
     alert_profile_ids:    alertProfileIds,
     active:               document.getElementById('rf_active')?.checked ? 1 : 0,
+    return_enabled:       returnEnabled,
+    return_time:          returnTime,
   };
 
   const result = await apiPost('save_route', route);

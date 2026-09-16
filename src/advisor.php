@@ -65,6 +65,22 @@ foreach ($routes as $route) {
             } catch (Exception $e) {
                 advisorLog($logFile, "Advisor error [{$route['id']}]: " . $e->getMessage());
             }
+
+            // Return leg: same day(s), reversed direction, arriving back at origin
+            if (!empty($route['return_enabled']) && !empty($route['return_time'])) {
+                $returnRoute = $route;
+                $returnRoute['origin']      = $route['destination'];
+                $returnRoute['destination'] = $route['origin'];
+                $returnRoute['label']       = $route['label'] . ' (Return)';
+
+                $returnSched = ['days' => $sched['days'] ?? '', 'arrive' => $route['return_time'], 'leg' => 'return'];
+
+                try {
+                    $advisor->run($returnRoute, $returnSched);
+                } catch (Exception $e) {
+                    advisorLog($logFile, "Advisor error [{$route['id']} return]: " . $e->getMessage());
+                }
+            }
         }
     }
 

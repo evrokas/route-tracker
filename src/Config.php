@@ -307,6 +307,8 @@ class Config
         $row['alert_profile_ids'] = json_decode($row['alert_profile_ids'] ?? '[]', true) ?: [];
         $row['advisor_enabled']   = (bool)(int)($row['advisor_enabled']   ?? 0);
         $row['active']            = (bool)(int)($row['active']            ?? 1);
+        $row['return_enabled']    = (bool)(int)($row['return_enabled']    ?? 0);
+        $row['return_time']       = $row['return_time'] ?? '';
         return $row;
     }
 
