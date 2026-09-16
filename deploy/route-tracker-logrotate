@@ -1,0 +1,17 @@
+# Reference logrotate config for Route Tracker's zops logs.
+#
+# Install:
+#   sudo cp deploy/route-tracker-logrotate /etc/logrotate.d/route-tracker
+#   sudo logrotate -d /etc/logrotate.d/route-tracker   # dry run first
+
+/var/log/zops/route-tracker-backup.log
+/var/log/zops/route-tracker-backup-cron.log
+/var/log/zops/route-tracker-monitor-cron.log {
+    size 10M
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0660 www-data www-data
+}

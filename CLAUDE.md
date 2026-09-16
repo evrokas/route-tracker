@@ -240,6 +240,64 @@ COALESCE(SQRT(AVG(col*col) - AVG(col)*AVG(col)), 0)
 - Ensure route has `alert_profile_ids` set and the profile is enabled
 - Ensure channel profile credentials are correct; use Test button in Settings → Alerts
 
+## Backups + health monitoring (`lib/zops`, `deploy/{backup,health}-handler.php`)
+
+Route Tracker's first backup/health-check setup, on **zops**
+(<https://github.com/evrokas/zops>, cloned as `lib/zops/` — see
+`lib/zops/docs/INSTALL.md`), the shared backup + health-monitoring engine
+used across this practice's app suite. zops carries no knowledge of this
+app's schema at all — it invokes `deploy/backup-handler.php` and
+`deploy/health-handler.php` as separate subprocesses, each speaking the
+plain JSON protocol documented in `lib/zops/docs/PROTOCOL.md`/`HANDLERS.md`.
+
+This app's real failure mode is invisible over HTTP: a route-tracker whose
+`*/5 * * * * php src/advisor.php` cron has silently died still serves its
+dashboard fine, just against increasingly stale data. So the health
+handler's checks are about the cron pipeline, not a web route.
+
+**`deploy/backup-handler.php`** ships 3 elements: `db` (`data/routes.sqlite`,
+hot-backed-up via zops's `SqliteDump` helper — `VACUUM INTO`, safe under
+WAL mode, `PRAGMA integrity_check`/`foreign_key_check`-verified, gzipped),
+`state` (`data/alert_counts.json` — small, but losing it re-fires every
+alert already sent today, since it's the only record of each route's daily
+alert count; omitted entirely on a fresh install where it doesn't exist
+yet), and `config` (`config/settings.php`, if present — deployment-level
+constants only; the one real secret this app has, the Google Maps API key,
+lives inside the `settings` SQLite table, already covered by the `db`
+element, not in this file).
+
+**`deploy/health-handler.php`** checks the SQLite database opens and
+passes `PRAGMA quick_check`, that `data/` is genuinely writable (a real
+write-and-delete probe), that `data/advisor.log`'s mtime is fresh (≤15
+minutes — the collection cron runs every 5; a stale log is the clearest
+"the cron stopped running" signal there is, since nothing else would ever
+surface it), and that a Google Maps API key is actually configured in the
+`settings` table. `info` surfaces `active_routes`, `trips_collected_today`,
+`last_collection_at` (also checked for freshness — `warn`, not `fail`, if
+over an hour old, since a route with no active schedule window right now
+is a normal state, not a fault), and `alerts_sent_today` (summed from
+`data/alert_counts.json`).
+
+**Setup**: `deploy/backup.conf.example` (copy to
+`/etc/zops/sites.d/route-tracker.conf`), `deploy/route-tracker-backup.cron`
+(independent of, not a replacement for, the app's own collection cron —
+see that file's own comment), `deploy/route-tracker-logrotate`.
+`bash lib/zops/bin/zops-doctor --site=route-tracker` verifies the setup
+before trusting cron with it; `lib/zops/bin/zops-backup --site=route-tracker
+--dry-run` shows exactly what a real run would ship.
+
+**Verified end to end for real** — unlike the other apps in this suite,
+this one needed no MySQL server: seeded a real `data/routes.sqlite` via
+`php src/schema.php --init`, a real active route, a real trip row, a real
+Google Maps key, `data/alert_counts.json`, and `data/advisor.log`, then
+ran the actual health check (every check `ok`, `info` block correct) and a
+real (non-dry-run) `zops-backup` against a local destination — it shipped
+`db.sqlite.gz`/`state.json`/`config.zip`, promoted into daily/weekly/monthly
+tiers, and the shipped `db.sqlite.gz` was gunzipped and queried back
+afterward, confirming the route/trip/API-key data round-tripped
+byte-for-byte correctly. `php -l` clean on both handlers. Not yet run
+against a real Apache/PHP deployment or the app's own live collection cron.
+
 ## Security Notes
 
 - Never commit `data/` files with real credentials (already in `.gitignore`)
