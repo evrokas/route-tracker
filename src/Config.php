@@ -372,8 +372,42 @@ class Config
                         '_schedule_mode'  => $scheduleMode,
                         '_scheduled_time' => $sched['arrive'] ?? $sched['depart'],
                         '_collect_at'     => $collectAt,
+                        '_leg'            => 'outbound',
+                        '_trip_route_id'  => $route['id'],
                     ]);
                     break;
+                }
+            }
+
+            // Return leg: same day(s) as a forward 'arrive' entry, reversed direction,
+            // target arrival = return_time. Tracked under a suffixed trip route id so
+            // its historical durations never mix with the outbound leg's.
+            if (!empty($route['return_enabled']) && !empty($route['return_time'])) {
+                foreach ($route['schedule'] ?? [] as $sched) {
+                    if (!isset($sched['arrive'])) {
+                        continue;
+                    }
+                    $days = $this->parseDays($sched['days'] ?? '');
+                    if (!in_array($curDay, $days, true)) {
+                        continue;
+                    }
+
+                    $collectAt = $this->estimateDepartureTime($route['return_time']);
+
+                    if ($this->isWithinWindow($curTime, $collectAt, $before, $after)) {
+                        $active[] = array_merge($route, [
+                            'origin'          => $route['destination'],
+                            'destination'     => $route['origin'],
+                            'label'           => $route['label'] . ' (Return)',
+                            '_schedule'       => ['days' => $sched['days'] ?? '', 'arrive' => $route['return_time']],
+                            '_schedule_mode'  => 'arrive',
+                            '_scheduled_time' => $route['return_time'],
+                            '_collect_at'     => $collectAt,
+                            '_leg'            => 'return',
+                            '_trip_route_id'  => $route['id'] . '__return',
+                        ]);
+                        break;
+                    }
                 }
             }
         }
@@ -436,6 +470,16 @@ class Config
                         'time'       => $time,
                         'collect_at' => $collectAt,
                     ];
+
+                    if ($mode === 'arrive' && !empty($route['return_enabled']) && !empty($route['return_time'])) {
+                        $schedule[$day][] = [
+                            'route_id'   => $route['id'] . '__return',
+                            'label'      => $route['label'] . ' (Return)',
+                            'mode'       => 'arrive',
+                            'time'       => $route['return_time'],
+                            'collect_at' => $this->estimateDepartureTime($route['return_time']),
+                        ];
+                    }
                 }
             }
         }

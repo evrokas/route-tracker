@@ -100,7 +100,11 @@ class DepartureAdvisor
         }
 
         // ── Load historical stats for buffer calculation ──────────────────
-        $histStats = $this->getHistoricalStats($route['id'], $today, $arriveTime);
+        // Return legs are stored under a suffixed trip route id (see Config::getActiveRoutes())
+        // so their history never mixes with the outbound leg's.
+        $isReturnLeg  = ($schedEntry['leg'] ?? '') === 'return';
+        $histRouteId  = $isReturnLeg ? $route['id'] . '__return' : $route['id'];
+        $histStats    = $this->getHistoricalStats($histRouteId, $today, $arriveTime);
         $avgSec    = $histStats['avg'] ?? null;
         $stddevSec = $histStats['stddev'] ?? 0;
 
@@ -146,7 +150,7 @@ class DepartureAdvisor
         }
 
         // ── Load state and check if this stage already fired today ────────
-        $schedKey = $arriveTime . '_arrive' . (($schedEntry['leg'] ?? '') === 'return' ? '_return' : '');
+        $schedKey = $arriveTime . '_arrive' . ($isReturnLeg ? '_return' : '');
         $state    = $this->loadState($route['id'], $schedKey, $todayDate);
         $fired    = $state['stages_fired'] ?? [];
 
