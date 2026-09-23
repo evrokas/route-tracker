@@ -1,0 +1,50 @@
+# Reference site config for zops (lib/zops's bin/zops-backup,
+# bin/zops-monitor, bin/zops-restore, bin/zops-doctor) -- Route Tracker's
+# backup/health-check setup (see CLAUDE.md's "Backups + health
+# monitoring" section). See lib/zops/docs/INSTALL.md for the clone
+# command and lib/zops/docs/HANDLERS.md for what
+# backup-handler.php/health-handler.php (both in this same deploy/
+# directory) actually do.
+#
+# Install:
+#   sudo mkdir -p /etc/zops/sites.d
+#   sudo cp deploy/backup.conf.example /etc/zops/sites.d/route-tracker.conf
+#   sudo $EDITOR /etc/zops/sites.d/route-tracker.conf
+#   sudo chmod 600 /etc/zops/sites.d/route-tracker.conf
+#
+# Recommended: a dedicated "zops" system user, group-shared with whichever
+# user Apache/PHP actually runs as.
+
+BACKUP_HANDLER=/var/www/html/apps/tracker/deploy/backup-handler.php
+HEALTH_HANDLER=/var/www/html/apps/tracker/deploy/health-handler.php
+
+# No Dir::link() element on this app -- the whole "content" this app has
+# is one small SQLite database plus one small JSON state file, both
+# shipped as plain `file` elements -- any scratch location works.
+WORK_DIR=/var/lib/zops/route-tracker-work
+LOG_FILE=/var/log/zops/route-tracker-backup.log
+STATUS_FILE=/var/lib/zops/route-tracker-backup-status.json
+HEALTH_TIMEOUT=30
+
+# --- Destinations (one or more) -----------------------------------------
+DEST_1=ssh:zops@backup.example.com:/srv/zops-backups/route-tracker
+DEST_1_KEY=/home/zops/.ssh/id_ed25519
+#DEST_2=local:/mnt/usb-backup/route-tracker
+
+# --- Retention (tiered daily/weekly/monthly) -----------------------------
+KEEP_DAILY=14
+KEEP_WEEKLY=8
+KEEP_MONTHLY=12
+
+# --- Collector (optional) ------------------------------------------------
+COLLECTOR_URL=https://backup-status.example.com/ingest.php
+COLLECTOR_KEY=
+
+# This app's real secret (the Google Maps API key) lives inside the
+# SQLite database itself, already covered by the "db" element -- the
+# "config" element (config/settings.php, if present) only ever holds
+# deployment-level constants (paths, timeouts), never a credential.
+#ENCRYPT_ELEMENTS=true
+#ENCRYPT_PASSPHRASE=
+
+TIMEOUT=1800
