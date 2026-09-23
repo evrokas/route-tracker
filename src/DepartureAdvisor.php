@@ -100,7 +100,11 @@ class DepartureAdvisor
         }
 
         // ── Load historical stats for buffer calculation ──────────────────
-        $histStats = $this->getHistoricalStats($route['id'], $today, $arriveTime);
+        // Return legs are stored under a suffixed trip route id (see Config::getActiveRoutes())
+        // so their history never mixes with the outbound leg's.
+        $isReturnLeg  = ($schedEntry['leg'] ?? '') === 'return';
+        $histRouteId  = $isReturnLeg ? $route['id'] . '__return' : $route['id'];
+        $histStats    = $this->getHistoricalStats($histRouteId, $today, $arriveTime);
         $avgSec    = $histStats['avg'] ?? null;
         $stddevSec = $histStats['stddev'] ?? 0;
 
@@ -145,7 +149,7 @@ class DepartureAdvisor
         }
 
         // ── Load state and check if this stage already fired today ────────
-        $schedKey = $arriveTime . '_arrive';
+        $schedKey = $arriveTime . '_arrive' . ($isReturnLeg ? '_return' : '');
         $state    = $this->loadState($route['id'], $schedKey, $todayDate);
         $fired    = $state['stages_fired'] ?? [];
 
@@ -231,16 +235,17 @@ class DepartureAdvisor
             case 'planning':
                 return "📋 Departure Planning\n\n" .
                        "Route: {$routeLabel}\n" .
+                       "Recommended departure: {$recommendedDepart}\n" .
                        "Target arrival: {$arriveTime}\n" .
-                       "Traffic looks normal. Leave by {$recommendedDepart} to arrive by {$arriveTime}{$via} ({$liveMin} min{$vsAvg}).\n" .
+                       "Traffic looks normal{$via} ({$liveMin} min{$vsAvg}).\n" .
                        "Buffer: {$bufferMin} min\n\n" .
                        "🧭 {$gmapsUrl}{$monitor}";
 
             case 'window':
                 return "🕐 Departure Window\n\n" .
                        "Route: {$routeLabel}\n" .
-                       "Target arrival: {$arriveTime}\n" .
                        "Recommended departure: {$recommendedDepart}\n" .
+                       "Target arrival: {$arriveTime}\n" .
                        "Live estimate: {$liveMin} min{$via}{$vsAvg}\n\n" .
                        "🧭 {$gmapsUrl}{$monitor}";
 
@@ -415,58 +420,80 @@ class DepartureAdvisor
                 continue;
             }
 
+            // Exemption profiles: hide the card entirely on an exempted date
+            if ($this->config->isRouteExemptOn($route, $today)) {
+                continue;
+            }
+
             foreach ($route['schedule'] ?? [] as $sched) {
                 if (!isset($sched['arrive'])) {
                     continue;
                 }
 
-                $arriveTime = $sched['arrive'];
-                $schedKey   = $arriveTime . '_arrive';
-                $days       = $this->config->parseDays($sched['days'] ?? '');
+                $result[] = $this->buildStatusRow($route, $sched, $today, false);
 
-                $state = $this->loadState($route['id'], $schedKey, $today);
+                // Return leg: same day(s), reversed direction, arriving back at origin
+                if (!empty($route['return_enabled']) && !empty($route['return_time'])) {
+                    $returnRoute = $route;
+                    $returnRoute['origin']      = $route['destination'];
+                    $returnRoute['destination'] = $route['origin'];
+                    $returnRoute['label']       = $route['label'] . ' (Return)';
 
-                [$ah, $am] = explode(':', $arriveTime);
-                $arrivalMinutes = (int)$ah * 60 + (int)$am;
-                $currentMinutes = (int)date('H') * 60 + (int)date('i');
+                    $returnSched = ['days' => $sched['days'] ?? '', 'arrive' => $route['return_time']];
 
-                $recDep    = $state['recommended_departure'] ?? null;
-                $recDepMin = null;
-                $untilDepart = null;
-
-                if ($recDep) {
-                    [$rh, $rm] = explode(':', $recDep);
-                    $recDepMin   = (int)$rh * 60 + (int)$rm;
-                    $untilDepart = $recDepMin - $currentMinutes;
+                    $result[] = $this->buildStatusRow($returnRoute, $returnSched, $today, true);
                 }
-
-                $monitorUrl = $this->config->getMonitoringUrl($route['id'], $schedKey, $today);
-                $runsToday  = in_array((int)date('N'), $days, true);
-
-                $result[] = [
-                    'route_id'              => $route['id'],
-                    'route_label'           => $route['label'],
-                    'origin'                => $route['origin'],
-                    'destination'           => $route['destination'],
-                    'arrive_time'           => $arriveTime,
-                    'days'                  => $sched['days'] ?? '',
-                    'runs_today'            => $runsToday,
-                    'one_time'              => !empty($route['one_time']),
-                    'recommended_departure' => $recDep,
-                    'live_duration_seconds' => $state['live_duration_seconds'] ?? null,
-                    'stages_fired'          => $state['stages_fired'] ?? [],
-                    'enabled_stages'        => $route['advisor_stages'],
-                    'until_departure_min'   => $untilDepart,
-                    'until_arrival_min'     => $arrivalMinutes - $currentMinutes,
-                    'last_check'            => $state['last_check'] ?? null,
-                    'buffer_mode'           => $route['advisor_buffer_mode'],
-                    'fixed_buffer'          => $route['advisor_fixed_buffer'],
-                    'monitor_url'           => $monitorUrl,
-                ];
             }
         }
 
         return $result;
+    }
+
+    private function buildStatusRow(array $route, array $sched, string $today, bool $isReturn): array
+    {
+        $arriveTime = $sched['arrive'];
+        $schedKey   = $arriveTime . '_arrive' . ($isReturn ? '_return' : '');
+        $days       = $this->config->parseDays($sched['days'] ?? '');
+
+        $state = $this->loadState($route['id'], $schedKey, $today);
+
+        [$ah, $am] = explode(':', $arriveTime);
+        $arrivalMinutes = (int)$ah * 60 + (int)$am;
+        $currentMinutes = (int)date('H') * 60 + (int)date('i');
+
+        $recDep      = $state['recommended_departure'] ?? null;
+        $untilDepart = null;
+
+        if ($recDep) {
+            [$rh, $rm] = explode(':', $recDep);
+            $recDepMin   = (int)$rh * 60 + (int)$rm;
+            $untilDepart = $recDepMin - $currentMinutes;
+        }
+
+        $monitorUrl = $this->config->getMonitoringUrl($route['id'], $schedKey, $today);
+        $runsToday  = in_array((int)date('N'), $days, true);
+
+        return [
+            'route_id'              => $route['id'],
+            'route_label'           => $route['label'],
+            'origin'                => $route['origin'],
+            'destination'           => $route['destination'],
+            'arrive_time'           => $arriveTime,
+            'days'                  => $sched['days'] ?? '',
+            'runs_today'            => $runsToday,
+            'is_return'             => $isReturn,
+            'one_time'              => !empty($route['one_time']),
+            'recommended_departure' => $recDep,
+            'live_duration_seconds' => $state['live_duration_seconds'] ?? null,
+            'stages_fired'          => $state['stages_fired'] ?? [],
+            'enabled_stages'        => $route['advisor_stages'],
+            'until_departure_min'   => $untilDepart,
+            'until_arrival_min'     => $arrivalMinutes - $currentMinutes,
+            'last_check'            => $state['last_check'] ?? null,
+            'buffer_mode'           => $route['advisor_buffer_mode'],
+            'fixed_buffer'          => $route['advisor_fixed_buffer'],
+            'monitor_url'           => $monitorUrl,
+        ];
     }
 
     // ──────────────────────────────────────────────────────────────────────────

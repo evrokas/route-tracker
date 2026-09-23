@@ -89,15 +89,18 @@ $lastCheck  = $state['last_check'] ?? null;
 $stagesFired = json_decode($state['stages_fired'] ?? '[]', true) ?: [];
 $expiresAt  = $tokenData['expires_at'];
 
-// Build gmaps URL from route
+// Build gmaps URL from route (swap origin/destination for the return leg)
 $routeRow = $pdo->prepare("SELECT origin, destination, travel_mode FROM routes WHERE id=?");
 $routeRow->execute([$tokenData['route_id']]);
 $route = $routeRow->fetch(PDO::FETCH_ASSOC);
+$isReturnLeg = str_ends_with($tokenData['schedule_key'] ?? '', '_return');
 $gmapsUrl = '';
 if ($route) {
+    $navOrigin      = $isReturnLeg ? $route['destination'] : $route['origin'];
+    $navDestination = $isReturnLeg ? $route['origin']      : $route['destination'];
     $gmapsUrl = "https://www.google.com/maps/dir/?api=1"
-              . "&origin="      . urlencode($route['origin'])
-              . "&destination=" . urlencode($route['destination'])
+              . "&origin="      . urlencode($navOrigin)
+              . "&destination=" . urlencode($navDestination)
               . "&travelmode="  . urlencode($route['travel_mode'] ?? 'driving');
 }
 

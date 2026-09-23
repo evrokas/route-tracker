@@ -106,7 +106,9 @@ function collectorMain(string $baseDir): void
 
 function processRoute(array $route, PDO $pdo, Config $config, AlertManager $alertMgr, string $logFile, bool $testMode): void
 {
-    $routeId = $route['id'];
+    // Return-leg windows carry a suffixed id so their trip history never mixes
+    // with the outbound leg's (see Config::getActiveRoutes()).
+    $routeId = $route['_trip_route_id'] ?? $route['id'];
     clog($logFile, "Collecting: {$routeId} ({$route['label']})");
 
     $params = [

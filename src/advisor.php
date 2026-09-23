@@ -48,12 +48,21 @@ if (empty($routes)) {
 
 $routesInWindow = [];
 foreach ($config->getActiveRoutes() as $r) {
-    $routesInWindow[$r['id']] = $r;
+    $key = $r['id'] . '_' . ($r['_leg'] ?? 'outbound');
+    $routesInWindow[$key] = $r;
 }
 
 // ─── Process each active route ────────────────────────────────────────────────
 
+$today = date('Y-m-d');
+
 foreach ($routes as $route) {
+    // Exemption profiles: skip alerts and collection entirely on an exempted date
+    // (collection is also already excluded from $routesInWindow for this date).
+    if ($config->isRouteExemptOn($route, $today)) {
+        continue;
+    }
+
     // 1. Advisor checks (arrive-mode schedules only)
     if (!empty($route['advisor_enabled'])) {
         foreach ($route['schedule'] ?? [] as $sched) {
@@ -65,15 +74,34 @@ foreach ($routes as $route) {
             } catch (Exception $e) {
                 advisorLog($logFile, "Advisor error [{$route['id']}]: " . $e->getMessage());
             }
+
+            // Return leg: same day(s), reversed direction, arriving back at origin
+            if (!empty($route['return_enabled']) && !empty($route['return_time'])) {
+                $returnRoute = $route;
+                $returnRoute['origin']      = $route['destination'];
+                $returnRoute['destination'] = $route['origin'];
+                $returnRoute['label']       = $route['label'] . ' (Return)';
+
+                $returnSched = ['days' => $sched['days'] ?? '', 'arrive' => $route['return_time'], 'leg' => 'return'];
+
+                try {
+                    $advisor->run($returnRoute, $returnSched);
+                } catch (Exception $e) {
+                    advisorLog($logFile, "Advisor error [{$route['id']} return]: " . $e->getMessage());
+                }
+            }
         }
     }
 
-    // 2. Data collection if route is in its scheduled window
-    if (isset($routesInWindow[$route['id']])) {
-        try {
-            processRoute($routesInWindow[$route['id']], $pdo, $config, $alertMgr, $collLog, false);
-        } catch (Exception $e) {
-            advisorLog($logFile, "Collection error [{$route['id']}]: " . $e->getMessage());
+    // 2. Data collection if route is in its scheduled window (outbound and/or return leg)
+    foreach (['outbound', 'return'] as $leg) {
+        $key = $route['id'] . '_' . $leg;
+        if (isset($routesInWindow[$key])) {
+            try {
+                processRoute($routesInWindow[$key], $pdo, $config, $alertMgr, $collLog, false);
+            } catch (Exception $e) {
+                advisorLog($logFile, "Collection error [{$route['id']} {$leg}]: " . $e->getMessage());
+            }
         }
     }
 }
