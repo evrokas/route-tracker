@@ -315,9 +315,32 @@ class Config
         $row['exemption_profile_ids'] = json_decode($row['exemption_profile_ids'] ?? '[]', true) ?: [];
         $row['advisor_enabled']       = (bool)(int)($row['advisor_enabled']       ?? 0);
         $row['active']                = (bool)(int)($row['active']                ?? 1);
-        $row['return_enabled']        = (bool)(int)($row['return_enabled']        ?? 0);
-        $row['return_time']           = $row['return_time'] ?? '';
         return $row;
+    }
+
+    /**
+     * Build the return leg for one schedule entry, or null if it has no 'return' time.
+     * Direction is reversed and the return time uses the entry's own mode
+     * (arrive → arrive back by; depart → depart from destination at).
+     *
+     * @return array{0: array, 1: array}|null  [swapped route, schedule entry with leg=return]
+     */
+    public function buildReturnLeg(array $route, array $sched): ?array
+    {
+        if (empty($sched['return'])) {
+            return null;
+        }
+        $mode = isset($sched['depart']) ? 'depart' : (isset($sched['arrive']) ? 'arrive' : null);
+        if ($mode === null) {
+            return null;
+        }
+
+        $returnRoute                = $route;
+        $returnRoute['origin']      = $route['destination'];
+        $returnRoute['destination'] = $route['origin'];
+        $returnRoute['label']       = $route['label'] . ' (Return)';
+
+        return [$returnRoute, ['days' => $sched['days'] ?? '', $mode => $sched['return'], 'leg' => 'return']];
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -393,35 +416,39 @@ class Config
                 }
             }
 
-            // Return leg: same day(s) as a forward 'arrive' entry, reversed direction,
-            // target arrival = return_time. Tracked under a suffixed trip route id so
-            // its historical durations never mix with the outbound leg's.
-            if (!empty($route['return_enabled']) && !empty($route['return_time'])) {
-                foreach ($route['schedule'] ?? [] as $sched) {
-                    if (!isset($sched['arrive'])) {
-                        continue;
-                    }
-                    $days = $this->parseDays($sched['days'] ?? '');
-                    if (!in_array($curDay, $days, true)) {
-                        continue;
-                    }
+            // Return legs: one per schedule entry that has its own 'return' time, on that
+            // entry's days, reversed direction. Tracked under a suffixed trip route id so
+            // their historical durations never mix with the outbound leg's.
+            foreach ($route['schedule'] ?? [] as $sched) {
+                $leg = $this->buildReturnLeg($route, $sched);
+                if ($leg === null) {
+                    continue;
+                }
+                [$returnRoute, $returnSched] = $leg;
 
-                    $collectAt = $this->estimateDepartureTime($route['return_time']);
+                $days = $this->parseDays($sched['days'] ?? '');
+                if (!in_array($curDay, $days, true)) {
+                    continue;
+                }
 
-                    if ($this->isWithinWindow($curTime, $collectAt, $before, $after)) {
-                        $active[] = array_merge($route, [
-                            'origin'          => $route['destination'],
-                            'destination'     => $route['origin'],
-                            'label'           => $route['label'] . ' (Return)',
-                            '_schedule'       => ['days' => $sched['days'] ?? '', 'arrive' => $route['return_time']],
-                            '_schedule_mode'  => 'arrive',
-                            '_scheduled_time' => $route['return_time'],
-                            '_collect_at'     => $collectAt,
-                            '_leg'            => 'return',
-                            '_trip_route_id'  => $route['id'] . '__return',
-                        ]);
-                        break;
-                    }
+                if (isset($returnSched['depart'])) {
+                    $collectAt    = $returnSched['depart'];
+                    $scheduleMode = 'depart';
+                } else {
+                    $collectAt    = $this->estimateDepartureTime($returnSched['arrive']);
+                    $scheduleMode = 'arrive';
+                }
+
+                if ($this->isWithinWindow($curTime, $collectAt, $before, $after)) {
+                    $active[] = array_merge($returnRoute, [
+                        '_schedule'       => $returnSched,
+                        '_schedule_mode'  => $scheduleMode,
+                        '_scheduled_time' => $sched['return'],
+                        '_collect_at'     => $collectAt,
+                        '_leg'            => 'return',
+                        '_trip_route_id'  => $route['id'] . '__return',
+                    ]);
+                    break;
                 }
             }
         }
@@ -486,13 +513,15 @@ class Config
                         'collect_at' => $collectAt,
                     ];
 
-                    if ($mode === 'arrive' && !empty($route['return_enabled']) && !empty($route['return_time'])) {
+                    if (!empty($sched['return'])) {
                         $schedule[$day][] = [
                             'route_id'   => $route['id'] . '__return',
                             'label'      => $route['label'] . ' (Return)',
-                            'mode'       => 'arrive',
-                            'time'       => $route['return_time'],
-                            'collect_at' => $this->estimateDepartureTime($route['return_time']),
+                            'mode'       => $mode,
+                            'time'       => $sched['return'],
+                            'collect_at' => $mode === 'depart'
+                                ? $sched['return']
+                                : $this->estimateDepartureTime($sched['return']),
                         ];
                     }
                 }

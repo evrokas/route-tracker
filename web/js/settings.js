@@ -169,7 +169,7 @@ function renderRouteList(routes) {
       <td>${escHtml(r.label)}</td>
       <td style="font-size:12px;color:var(--muted)">${escHtml(r.origin||'')} → ${escHtml(r.destination||'')}</td>
       <td>${profileBadges}</td>
-      <td>${r.advisor_enabled ? '✓' : '–'}${r.return_enabled ? ' <span class="ap-badge" title="Return trip alerts enabled">↩ return</span>' : ''}${(r.exemption_profile_ids||[]).length ? ` <span class="ap-badge" title="Exemption profiles assigned">⛔ ${r.exemption_profile_ids.length}</span>` : ''}</td>
+      <td>${r.advisor_enabled ? '✓' : '–'}${(r.schedule||[]).some(s => s.return) ? ' <span class="ap-badge" title="Has return trip(s)">↩ return</span>' : ''}${(r.exemption_profile_ids||[]).length ? ` <span class="ap-badge" title="Exemption profiles assigned">⛔ ${r.exemption_profile_ids.length}</span>` : ''}</td>
       <td>
         <button class="btn-tiny" data-action="edit-route" data-id="${escHtml(r.id)}">Edit</button>
         <button class="btn-tiny btn-danger" data-action="delete-route" data-id="${escHtml(r.id)}">Delete</button>
@@ -206,7 +206,6 @@ async function showRouteForm(route) {
     advisor_buffer_mode: 'auto', advisor_fixed_buffer: 10,
     advisor_stages: ['planning','window','reminder','urgent','last_call'],
     alert_profile_ids: [], active: true,
-    return_enabled: false, return_time: '',
     exemption_profile_ids: [],
   };
 
@@ -325,18 +324,6 @@ async function showRouteForm(route) {
             <label>Alert stages</label>
             <div class="checkbox-row">${stageCheckboxes}</div>
           </div>
-          <div class="field-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="rf_return_enabled" ${r.return_enabled ? 'checked' : ''}
-                     onchange="document.getElementById('rf_return_time_wrap').style.display = this.checked ? '' : 'none'">
-              Enable return trip alerts
-            </label>
-            <div class="field-hint">Also alerts for the reverse leg (destination → origin), on the same scheduled days, arriving back by the time below.</div>
-          </div>
-          <div class="field-group" id="rf_return_time_wrap" style="${r.return_enabled ? '' : 'display:none'}">
-            <label>Return arrival time (HH:MM)</label>
-            <input type="text" id="rf_return_time" value="${escHtml(r.return_time || '')}" placeholder="HH:MM" maxlength="5" pattern="\\d{2}:\\d{2}" oninput="autoColonTime(this)">
-          </div>
         </div>
       </details>
 
@@ -371,6 +358,7 @@ function buildSchedRow(s, idx) {
   const days = ['Weekdays','Weekends','All','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   const mode = s.arrive ? 'arrive' : 'depart';
   const time = s.arrive || s.depart || '';
+  const hasReturn = !!s.return;
   return `<div class="sched-row" data-idx="${idx}">
     <select class="sched-days">
       ${days.map(d => `<option ${s.days===d?'selected':''}>${d}</option>`).join('')}
@@ -380,6 +368,12 @@ function buildSchedRow(s, idx) {
       <option value="depart" ${mode==='depart'?'selected':''}>depart at</option>
     </select>
     <input type="text" class="sched-time" value="${escHtml(time)}" placeholder="HH:MM" maxlength="5" pattern="\\d{2}:\\d{2}" oninput="autoColonTime(this)">
+    <label class="sched-return-toggle" title="Also track the way back, with its own time (arrive back by / depart at, same mode as this entry)">
+      <input type="checkbox" class="sched-ret-chk" ${hasReturn ? 'checked' : ''}
+             onchange="this.closest('.sched-row').querySelector('.sched-ret-time').style.display = this.checked ? '' : 'none'">
+      ↩ return
+    </label>
+    <input type="text" class="sched-time sched-ret-time" value="${escHtml(s.return || '')}" placeholder="HH:MM" maxlength="5" pattern="\\d{2}:\\d{2}" oninput="autoColonTime(this)" style="${hasReturn ? '' : 'display:none'}">
     <button class="btn-tiny btn-danger" onclick="this.closest('.sched-row').remove()">−</button>
   </div>`;
 }
@@ -400,16 +394,24 @@ function addSchedRow() {
 function getScheduleFromForm() {
   const rows = document.querySelectorAll('#rf_schedule .sched-row');
   const schedule = [];
-  rows.forEach(row => {
+  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+  for (const row of rows) {
     const days = row.querySelector('.sched-days')?.value;
     const mode = row.querySelector('.sched-mode')?.value;
-    const time = row.querySelector('.sched-time')?.value?.trim();
+    const time = row.querySelector('.sched-time:not(.sched-ret-time)')?.value?.trim();
     if (days && mode && time) {
       const entry = { days };
       entry[mode] = time;
+      if (row.querySelector('.sched-ret-chk')?.checked) {
+        const ret = row.querySelector('.sched-ret-time')?.value?.trim();
+        if (!timeRe.test(ret || '')) {
+          return { error: `Return time for the ${days} ${time} entry must be HH:MM` };
+        }
+        entry.return = ret;
+      }
       schedule.push(entry);
     }
-  });
+  }
   return schedule;
 }
 
@@ -426,11 +428,9 @@ async function saveRoute(originalId) {
   const exemptionProfileIds = [...document.querySelectorAll('input[name="exemption_profile_id"]:checked')].map(el => el.value);
   const advisorStages       = [...document.querySelectorAll('input[name="adv_stage"]:checked')].map(el => el.value);
 
-  const returnEnabled = document.getElementById('rf_return_enabled')?.checked ? 1 : 0;
-  const returnTime    = getVal('rf_return_time').trim();
-
-  if (returnEnabled && !/^([01]\d|2[0-3]):[0-5]\d$/.test(returnTime)) {
-    showStatus('routeFormStatus', 'Return time must be in HH:MM format', false);
+  const schedule = getScheduleFromForm();
+  if (schedule.error) {
+    showStatus('routeFormStatus', schedule.error, false);
     return;
   }
 
@@ -440,7 +440,7 @@ async function saveRoute(originalId) {
     origin:               getVal('rf_origin'),
     destination:          getVal('rf_dest'),
     travel_mode:          getVal('rf_mode'),
-    schedule:             getScheduleFromForm(),
+    schedule,
     advisor_enabled:      document.getElementById('rf_adv_enabled')?.checked ? 1 : 0,
     advisor_start_before: parseInt(getVal('rf_adv_start')) || 90,
     advisor_buffer_mode:  getVal('rf_adv_mode'),
@@ -449,8 +449,6 @@ async function saveRoute(originalId) {
     alert_profile_ids:    alertProfileIds,
     exemption_profile_ids: exemptionProfileIds,
     active:               document.getElementById('rf_active')?.checked ? 1 : 0,
-    return_enabled:       returnEnabled,
-    return_time:          returnTime,
   };
 
   const result = await apiPost('save_route', route);

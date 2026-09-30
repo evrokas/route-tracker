@@ -95,8 +95,6 @@ CREATE TABLE IF NOT EXISTS routes (
     active               INTEGER DEFAULT 1,
     one_time             INTEGER DEFAULT 0,
     one_time_used        INTEGER DEFAULT 0,
-    return_enabled       INTEGER DEFAULT 0,
-    return_time          TEXT    DEFAULT NULL,
     created_at           TEXT,
     updated_at           TEXT
 );
@@ -281,24 +279,35 @@ try {
 }
 
 try {
-    $pdo->exec("ALTER TABLE routes ADD COLUMN return_enabled INTEGER DEFAULT 0");
-    echo "✓ Migration: added return_enabled to routes\n";
-} catch (Exception $e) {
-    // Column already exists — no action needed
-}
-
-try {
-    $pdo->exec("ALTER TABLE routes ADD COLUMN return_time TEXT DEFAULT NULL");
-    echo "✓ Migration: added return_time to routes\n";
-} catch (Exception $e) {
-    // Column already exists — no action needed
-}
-
-try {
     $pdo->exec("ALTER TABLE routes ADD COLUMN exemption_profile_ids TEXT DEFAULT '[]'");
     echo "✓ Migration: added exemption_profile_ids to routes\n";
 } catch (Exception $e) {
     // Column already exists — no action needed
+}
+
+// Return times now live per schedule entry ({days, arrive|depart, return}).
+// Fold the old route-level routes.return_enabled/return_time (deprecated columns,
+// left in place on existing DBs) into every schedule entry, then clear the flag
+// so this is a no-op on re-runs.
+$routeCols = $pdo->query("PRAGMA table_info(routes)")->fetchAll(PDO::FETCH_COLUMN, 1);
+if (in_array('return_enabled', $routeCols, true) && in_array('return_time', $routeCols, true)) {
+    $legacy = $pdo->query(
+        "SELECT id, schedule, return_time FROM routes
+         WHERE return_enabled = 1 AND return_time IS NOT NULL AND return_time != ''"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $upd = $pdo->prepare("UPDATE routes SET schedule = :s, return_enabled = 0 WHERE id = :id");
+    foreach ($legacy as $r) {
+        $entries = json_decode($r['schedule'] ?? '[]', true) ?: [];
+        foreach ($entries as &$e) {
+            if ((isset($e['arrive']) || isset($e['depart'])) && !isset($e['return'])) {
+                $e['return'] = $r['return_time'];
+            }
+        }
+        unset($e);
+        $upd->execute([':s' => json_encode($entries), ':id' => $r['id']]);
+        echo "✓ Migration: moved return time of route '{$r['id']}' into its schedule entries\n";
+    }
 }
 
 // Add ON DELETE CASCADE to every table that references routes(id). Older DBs had

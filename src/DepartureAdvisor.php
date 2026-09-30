@@ -432,16 +432,11 @@ class DepartureAdvisor
 
                 $result[] = $this->buildStatusRow($route, $sched, $today, false);
 
-                // Return leg: same day(s), reversed direction, arriving back at origin
-                if (!empty($route['return_enabled']) && !empty($route['return_time'])) {
-                    $returnRoute = $route;
-                    $returnRoute['origin']      = $route['destination'];
-                    $returnRoute['destination'] = $route['origin'];
-                    $returnRoute['label']       = $route['label'] . ' (Return)';
-
-                    $returnSched = ['days' => $sched['days'] ?? '', 'arrive' => $route['return_time']];
-
-                    $result[] = $this->buildStatusRow($returnRoute, $returnSched, $today, true);
+                // Return leg for this entry (own return time, reversed direction).
+                // Only arrive-mode returns have an advisor card.
+                $leg = $this->config->buildReturnLeg($route, $sched);
+                if ($leg !== null && isset($leg[1]['arrive'])) {
+                    $result[] = $this->buildStatusRow($leg[0], $leg[1], $today, true);
                 }
             }
         }

@@ -174,6 +174,7 @@ php -S 0.0.0.0:8080 -t web    # Built-in PHP server for development
 - Day names: `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`, `Sun`
 - Groups: `Weekdays` (Mon–Fri), `Weekends` (Sat–Sun), `All` (Mon–Sun)
 - Schedule entries: `{ days, arrive }` or `{ days, depart }` stored as JSON in `routes.schedule`
+- Optional per-entry return leg: `{ days, arrive|depart, return: "HH:MM" }` — same days, reversed origin/destination, `return` interpreted in the entry's own mode (arrive back by / depart at). Return legs are collected under trip route id `<id>__return`; the advisor only acts on arrive-mode returns. (Replaces the old route-level `return_enabled`/`return_time`, which `schema.php` migrates into entries.)
 - Advisor only acts on `arrive`-mode schedule entries
 - Quick Trips use today's `date('D')` abbreviation (e.g. `Mon`) as their `days` value
 

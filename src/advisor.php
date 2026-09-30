@@ -66,26 +66,20 @@ foreach ($routes as $route) {
     // 1. Advisor checks (arrive-mode schedules only)
     if (!empty($route['advisor_enabled'])) {
         foreach ($route['schedule'] ?? [] as $sched) {
-            if (!isset($sched['arrive'])) {
-                continue;
-            }
-            try {
-                $advisor->run($route, $sched);
-            } catch (Exception $e) {
-                advisorLog($logFile, "Advisor error [{$route['id']}]: " . $e->getMessage());
-            }
-
-            // Return leg: same day(s), reversed direction, arriving back at origin
-            if (!empty($route['return_enabled']) && !empty($route['return_time'])) {
-                $returnRoute = $route;
-                $returnRoute['origin']      = $route['destination'];
-                $returnRoute['destination'] = $route['origin'];
-                $returnRoute['label']       = $route['label'] . ' (Return)';
-
-                $returnSched = ['days' => $sched['days'] ?? '', 'arrive' => $route['return_time'], 'leg' => 'return'];
-
+            if (isset($sched['arrive'])) {
                 try {
-                    $advisor->run($returnRoute, $returnSched);
+                    $advisor->run($route, $sched);
+                } catch (Exception $e) {
+                    advisorLog($logFile, "Advisor error [{$route['id']}]: " . $e->getMessage());
+                }
+            }
+
+            // Return leg for this entry (own return time, reversed direction).
+            // run() only acts on arrive-mode legs; depart-mode returns are collection-only.
+            $leg = $config->buildReturnLeg($route, $sched);
+            if ($leg !== null && isset($leg[1]['arrive'])) {
+                try {
+                    $advisor->run($leg[0], $leg[1]);
                 } catch (Exception $e) {
                     advisorLog($logFile, "Advisor error [{$route['id']} return]: " . $e->getMessage());
                 }
@@ -132,7 +126,12 @@ foreach ($expiring as $rt) {
         if (!isset($sched['arrive'])) {
             continue;
         }
-        $parts = explode(':', $sched['arrive']);
+        // Keep the route alive until its return leg is over too (HH:MM compares lexically)
+        $lastTime = $sched['arrive'];
+        if (!empty($sched['return']) && $sched['return'] > $lastTime) {
+            $lastTime = $sched['return'];
+        }
+        $parts = explode(':', $lastTime);
         if (count($parts) < 2) {
             continue;
         }
